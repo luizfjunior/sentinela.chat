@@ -47,7 +47,7 @@
 
 /* Typing indicator animation */
 .typing-indicator {
-  background-color: #3a3b3c;
+  background-color: #1e1e1e;
   will-change: transform;
   width: auto;
   border-radius: 50px;
@@ -61,7 +61,7 @@
   width: 8px;
   float: left;
   margin: 0 1px;
-  background-color: #9880ff;
+  background-color: #8e8ea0;
   display: block;
   border-radius: 50%;
   opacity: 0.4;
