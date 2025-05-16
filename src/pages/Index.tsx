@@ -62,15 +62,15 @@ const Index = () => {
   return <div className="flex flex-col h-screen bg-gray-900 text-white">
       {/* Header */}
       <header className="bg-gray-800 p-4 border-b border-gray-700">
-        <h1 className="text-xl font-semibold text-center">Agente IA de Processos</h1>
+        <h1 className="text-xl font-semibold text-center">AI  Chat  Process</h1>
       </header>
 
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? <div className="flex items-center justify-center h-full">
             <div className="text-center space-y-4">
-              <h2 className="font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent text-2xl">Seja Bem-Vindo!!</h2>
-              <p className="text-gray-400 text-lg">Vamos juntos organizar os processos, passo a passo!</p>
+              <h2 className="font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent text-2xl">👋 Olá! Seja bem-vindo ao Assistente de Processos.</h2>
+              <p className="text-gray-400 text-lg">Vamos organizar seus processos de forma simples e estruturada, passo a passo! </p>
             </div>
           </div> : messages.map(message => <ChatMessage key={message.id} message={message} />)}
         {loading && <div className="flex items-center space-x-2">
