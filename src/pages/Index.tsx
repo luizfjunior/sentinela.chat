@@ -40,7 +40,7 @@ const Index = () => {
     setLoading(true);
     
     try {
-      const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook-test/chat-process-pd1245", {
+      const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-process-pd1245", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
