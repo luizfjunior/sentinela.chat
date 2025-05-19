@@ -44,7 +44,7 @@ const ChatInput = ({ onSendMessage, isLoading }: ChatInputProps) => {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type your message..."
-          className="pr-12 resize-none max-h-32 bg-gray-800 border-gray-700 rounded-xl focus-visible:ring-blue-600 text-white placeholder-gray-400"
+          className="pr-12 resize-none max-h-32 bg-[#1e2634] border-gray-700 rounded-xl focus-visible:ring-blue-600 text-white placeholder-gray-400"
           disabled={isLoading}
           rows={1}
         />

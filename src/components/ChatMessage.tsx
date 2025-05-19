@@ -64,7 +64,7 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
           "rounded-2xl px-4 py-2 max-w-[80%] break-words",
           isUser
             ? "bg-blue-600 text-white rounded-tr-none"
-            : "bg-gray-800 text-white rounded-tl-none"
+            : "bg-[#1e2634] text-white rounded-tl-none"
         )}
       >
         <p className="whitespace-pre-wrap">{displayedContent}</p>
