@@ -1,3 +1,4 @@
+
 import React from 'react';
 const ProcessGuide = () => {
   return <div className="content-section text-gray-200">
@@ -30,47 +31,58 @@ const ProcessGuide = () => {
       </div>
 
       <div className="content-card mt-6">
-        <h3 className="text-blue-400 font-medium mb-2">🔹Exemplo de um possível processo realizado e estruturado: </h3>
+        <h3 className="text-blue-400 font-medium mb-2">🔹Exemplo de um possível processo realizado e estruturado: </h3>
         
-        <p><span className="highlighted-text">Processo:</span> 1 - Planejamento Comercial de Coleções (Tático)</p>
-        <p><span className="highlighted-text">Entrada:</span> Calendário comercial e metas de vendas</p>
+        <p><span className="highlighted-text">Processo:</span> Acompanhamento Logístico de Pedidos E-commerce (Tático)</p>
+        <p><span className="highlighted-text">Entrada:</span> Pedidos faturados na VTEX e informações de rastreio geradas pelas transportadoras</p>
         
         <div className="ml-4 mb-3">
-          <p><span className="highlighted-text">Subprocesso:</span> 1.1 Análise de Calendário Comercial (Tático)</p>
-          <p><span className="highlighted-text">Tarefa:</span> 1.1.1 Avaliar datas sazonais e concorrência</p>
+          <p><span className="highlighted-text">Subprocesso:</span> Monitoramento Diário dos Pedidos em Transporte</p>
+          <p><span className="highlighted-text">Tarefa:</span> 1.1 Verificar status dos pedidos com transportadoras</p>
           <ul className="ml-2 space-y-1">
-            <li>• Acessar o calendário comercial interno (arquivo do Google Sheets ou planejamento anual da diretoria comercial)</li>
-            <li>• Identificar datas relevantes para o varejo (ex: Dia das Mães, Black Friday, Natal, Liquidações Sazonais)</li>
-            <li>• Consultar dados históricos de vendas nas mesmas datas (relatórios no Power BI ou no ERP/VTEX)</li>
-            <li>• Analisar campanhas da concorrência através de sites, newsletters e redes sociais dos players do mercado</li>
-            <li>• Definir as campanhas prioritárias para a temporada com base em potencial de vendas e metas por canal</li>
-            <li>• Atualizar o calendário com campanhas confirmadas, datas de execução e responsáveis pelas entregas</li>
-            <li>• Compartilhar o calendário validado com as áreas envolvidas (VM, Produtos, Estúdio, Cadastro)</li>
+            <li>• Acessar o painel de logística (ex: Intelipost, Mandae, Jadlog ou integração via planilha)</li>
+            <li>• Filtrar os pedidos com status "Em transporte" e data de envio até o dia anterior</li>
+            <li>• Validar se há movimentações recentes no rastreio</li>
+            <li>• Identificar pedidos com atraso, sem movimentação ou com status indefinido</li>
+            <li>• Exportar a lista de pedidos com risco logístico (ex: atraso, erro de rota, entrega não realizada)</li>
+          </ul>
+          
+          <p><span className="highlighted-text">Tarefa:</span> 1.2 Atualizar relatório de pedidos críticos</p>
+          <ul className="ml-2 space-y-1">
+            <li>• Abrir a planilha compartilhada "Pedidos com Pendência Logística"</li>
+            <li>• Inserir os pedidos identificados no monitoramento, com nome do cliente, status, prazo e SLA</li>
+            <li>• Classificar o tipo de problema (ex: atraso, erro de destino, devolução)</li>
+            <li>• Compartilhar relatório com SAC e time de atendimento para ações preventivas</li>
+            <li>• Atualizar a coluna "status tratativa" conforme evolução do caso</li>
           </ul>
         </div>
         
         <div className="ml-4 mb-3">
-          <p><span className="highlighted-text">Subprocesso:</span> 1.2 Seleção de Produtos por Coleção (Tático)</p>
-          <p><span className="highlighted-text">Tarefa:</span> 1.2.1 Definir produtos estratégicos para campanhas</p>
+          <p><span className="highlighted-text">Subprocesso:</span> Acionamento e Tratativas com Transportadoras</p>
+          <p><span className="highlighted-text">Tarefa:</span> 2.1 Abrir chamados junto à transportadora</p>
           <ul className="ml-2 space-y-1">
-            <li>• Abrir a planilha de lançamentos ou mix de produtos da temporada</li>
-            <li>• Aplicar filtros por status de lançamento recente (ex: produtos cadastrados nos últimos 30 dias no MEGA ou VTEX)</li>
-            <li>• Acessar o sistema MEGA para consultar margem bruta (markup) de cada produto</li>
-            <li>• Priorizar produtos com margem acima de X% (ex: 55%), ou com alto giro em campanhas anteriores</li>
-            <li>• Verificar disponibilidade de estoque nos canais 1P e lojas físicas</li>
-            <li>• Validar se o produto possui material fotográfico pronto (consultar planilha de cadastro unificado ou pasta no Drive)</li>
-            <li>• Indicar os produtos aprovados com marcador na planilha (coluna: "Campanha Ativa = Sim")</li>
-            <li>• Consolidar a lista de produtos e exportar para inclusão no briefing da campanha</li>
+            <li>• Acessar o portal ou canal de atendimento da transportadora</li>
+            <li>• Abrir protocolo com número do pedido, rastreio e descrição do problema</li>
+            <li>• Salvar o número do chamado na planilha de pendências e registrar data de abertura</li>
+            <li>• Aguardar resposta e atualizar status da tratativa diariamente</li>
+          </ul>
+          
+          <p><span className="highlighted-text">Tarefa:</span> 2.2 Solicitar priorização ou reentrega</p>
+          <ul className="ml-2 space-y-1">
+            <li>• Quando aplicável, solicitar via canal de atendimento a priorização de entrega</li>
+            <li>• Nos casos de devolução por ausência, solicitar nova tentativa</li>
+            <li>• Confirmar retorno da transportadora e atualizar o cliente via SAC ou CRM interno</li>
+            <li>• Encerrar o caso somente após confirmação de entrega ou devolução finalizada</li>
           </ul>
         </div>
         
-        <p><span className="highlighted-text">Saída:</span> Campanhas comerciais planejadas e aprovadas, com briefing enviado para VM, Estúdio e Cadastro.</p>
+        <p><span className="highlighted-text">Saída:</span> Pedidos monitorados, tratativas logísticas registradas e pendências solucionadas com transportadoras</p>
         
         <p className="mt-3"><span className="highlighted-text">Ferramentas:</span></p>
         <ul className="ml-2">
-          <li>Planilha Google Sheets - Planejamento de campanhas, organização de coleções e compartilhamento com outras áreas.</li>
-          <li>ClickUp - Gestão de tarefas e acompanhamento de demandas</li>
-          <li>ERP - Acesso a dados de produtos como SKU, EAN, grade de numeração, etc</li>
+          <li>Plataforma de gestão de transporte (Intelipost, Jadlog, Correios)</li>
+          <li>Planilha "Pendências Logísticas"</li>
+          <li>Slack ou e-mail interno para integração com SAC</li>
         </ul>
       </div>
     </div>;
