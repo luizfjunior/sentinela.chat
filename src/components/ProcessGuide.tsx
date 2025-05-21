@@ -1,9 +1,6 @@
-
 import React from 'react';
-
 const ProcessGuide = () => {
-  return (
-    <div className="content-section text-gray-200">
+  return <div className="content-section text-gray-200">
       <p>
         Um processo é um conjunto de atividades organizadas para alcançar um objetivo específico dentro do departamento. 
         Ele pode envolver mais de uma pessoa e pode estar ligado a diferentes setores da empresa.
@@ -33,7 +30,7 @@ const ProcessGuide = () => {
       </div>
 
       <div className="content-card mt-6">
-        <h3 className="text-blue-400 font-medium mb-2">🔹 Exemplo de um possível processo realizado e estruturado: (Comercial):</h3>
+        <h3 className="text-blue-400 font-medium mb-2">🔹Exemplo de um possível processo realizado e estruturado: </h3>
         
         <p><span className="highlighted-text">Processo:</span> 1 - Planejamento Comercial de Coleções (Tático)</p>
         <p><span className="highlighted-text">Entrada:</span> Calendário comercial e metas de vendas</p>
@@ -76,8 +73,6 @@ const ProcessGuide = () => {
           <li>ERP - Acesso a dados de produtos como SKU, EAN, grade de numeração, etc</li>
         </ul>
       </div>
-    </div>
-  );
+    </div>;
 };
-
 export default ProcessGuide;
