@@ -109,23 +109,3 @@
     opacity: 1;
   }
 }
-
-.content-section {
-  @apply text-white text-sm md:text-base;
-}
-
-.content-section p {
-  @apply mb-4;
-}
-
-.content-card {
-  @apply bg-[#1a1f2c] bg-opacity-60 p-4 rounded-md mb-4;
-}
-
-.highlighted-text {
-  @apply font-semibold text-blue-400;
-}
-
-.emoji-bullet {
-  @apply text-blue-300 mr-1;
-}
