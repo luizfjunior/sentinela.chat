@@ -1,27 +1,33 @@
+
 import { useState, useRef, useEffect } from "react";
 import ChatMessage from "../components/ChatMessage";
 import ChatInput from "../components/ChatInput";
 import { toast } from "sonner";
-import { Trash2, MoreVertical } from "lucide-react";
+import { Trash2, MoreVertical, MessageSquare } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
 interface Message {
   id: string;
   content: string;
   role: "user" | "assistant";
   timestamp: Date;
 }
+
 const Index = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth"
     });
   };
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
   const handleSendMessage = async (content: string) => {
     if (!content.trim()) return;
 
@@ -34,6 +40,7 @@ const Index = () => {
     };
     setMessages(prev => [...prev, userMessage]);
     setLoading(true);
+
     try {
       const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-process-pd1245", {
         method: "POST",
@@ -78,24 +85,30 @@ const Index = () => {
       setLoading(false);
     }
   };
+
   const handleClearChat = () => {
     setMessages([]);
     toast.success("Conversa limpa com sucesso!");
   };
-  return <div className="flex flex-col h-screen bg-[#0f1218] text-white w-full">
+
+  return (
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#0f1218] text-gray-900 dark:text-white">
       {/* Header */}
-      <header className="bg-[#131a27] p-4 border-b border-gray-800 flex items-center justify-between">
-        <div className="w-10">
-          {/* Empty space to balance the layout */}
-        </div>
-        <h1 className="text-xl font-semibold text-center flex-grow">IA Chat Sentinela</h1>
-        <div className="w-10 flex justify-end">
+      <header className="sticky top-0 z-50 bg-white/80 dark:bg-[#131a27]/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600">
+              <MessageSquare className="w-5 h-5 text-white" />
+            </div>
+            <h1 className="text-lg font-semibold">IA Chat Process</h1>
+          </div>
+          
           <DropdownMenu>
-            <DropdownMenuTrigger className="p-1 rounded-md hover:bg-gray-700 focus:outline-none">
+            <DropdownMenuTrigger className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none transition-colors">
               <MoreVertical className="w-5 h-5" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="bg-[#1a1f2c] border-gray-700 text-white">
-              <DropdownMenuItem onClick={handleClearChat} className="flex items-center gap-2 cursor-pointer hover:bg-gray-700">
+            <DropdownMenuContent align="end" className="bg-white dark:bg-[#1a1f2c] border-gray-200 dark:border-gray-700">
+              <DropdownMenuItem onClick={handleClearChat} className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
                 <Trash2 className="w-4 h-4" />
                 <span>Limpar conversa</span>
               </DropdownMenuItem>
@@ -105,30 +118,70 @@ const Index = () => {
       </header>
 
       {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 max-w-4xl mx-auto w-full">
-        {messages.length === 0 ? <div className="flex items-center justify-center h-full">
-            <div className="text-center max-w-xl mx-auto space-y-4 px-4">
-              <h2 className="font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent text-2xl">👋 Olá! Seja bem-vindo ao Assistente de Auditoria.</h2>
-              <p className="text-gray-400 text-lg">Vamos analisar de forma simples e detalhada a documentação fornecida.</p>
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-4xl mx-auto px-4">
+          {messages.length === 0 ? (
+            <div className="flex items-center justify-center min-h-[60vh]">
+              <div className="text-center max-w-xl mx-auto space-y-6 px-4">
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-600/10 border border-blue-200/20 dark:border-purple-500/20">
+                  <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-3">
+                    👋 Olá! Seja bem-vindo ao Assistente de Processos
+                  </h2>
+                  <p className="text-gray-600 dark:text-gray-400 text-lg">
+                    Vamos analisar de forma simples e detalhada os processos e documentações fornecidos.
+                  </p>
+                </div>
+                
+                <div className="grid gap-3 mt-6">
+                  <div className="p-4 rounded-xl bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
+                    <p className="text-sm text-gray-700 dark:text-gray-300">
+                      📋 Descreva um processo que você gostaria de documentar
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
+                    <p className="text-sm text-gray-700 dark:text-gray-300">
+                      🔍 Analise e melhore processos existentes
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow">
+                    <p className="text-sm text-gray-700 dark:text-gray-300">
+                      ⚡ Identifique gargalos e oportunidades de automação
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
-          </div> : messages.map(message => <ChatMessage key={message.id} message={message} />)}
-        {loading && <div className="flex items-center space-x-2">
-            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center">
-              <span className="text-sm">AI</span>
+          ) : (
+            <div className="py-6 space-y-6">
+              {messages.map(message => (
+                <ChatMessage key={message.id} message={message} />
+              ))}
+              {loading && (
+                <div className="flex items-start gap-4">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+                    <span className="text-sm font-medium text-white">AI</span>
+                  </div>
+                  <div className="typing-indicator mt-1">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="typing-indicator">
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-          </div>}
-        <div ref={messagesEndRef} />
+          )}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
       {/* Chat Input */}
-      <div className="p-4 border-t border-gray-800 max-w-4xl mx-auto w-full">
-        <ChatInput onSendMessage={handleSendMessage} isLoading={loading} />
+      <div className="sticky bottom-0 bg-white/80 dark:bg-[#0f1218]/80 backdrop-blur-md border-t border-gray-200 dark:border-gray-800">
+        <div className="max-w-4xl mx-auto px-4 py-4">
+          <ChatInput onSendMessage={handleSendMessage} isLoading={loading} />
+        </div>
       </div>
-    </div>;
+    </div>
+  );
 };
+
 export default Index;

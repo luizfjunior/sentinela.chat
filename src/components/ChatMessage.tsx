@@ -1,7 +1,8 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { UserRound } from "lucide-react";
+import { UserRound, Copy, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface Message {
   id: string;
@@ -17,6 +18,7 @@ interface ChatMessageProps {
 const ChatMessage = ({ message }: ChatMessageProps) => {
   const [displayedContent, setDisplayedContent] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [showActions, setShowActions] = useState(false);
   const isUser = message.role === "user";
 
   // Typing animation for assistant messages
@@ -46,36 +48,77 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
     }
   }, [message, isUser]);
 
+  const handleCopy = () => {
+    navigator.clipboard.writeText(message.content);
+  };
+
   return (
     <div
       className={cn(
-        "flex items-start gap-3 group",
-        isUser ? "justify-end" : "justify-start"
+        "group relative",
+        isUser ? "ml-auto max-w-[80%]" : "mr-auto max-w-full"
       )}
+      onMouseEnter={() => setShowActions(true)}
+      onMouseLeave={() => setShowActions(false)}
     >
-      {!isUser && (
-        <div className="h-8 w-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-md">
-          <span className="text-sm font-medium text-white">AI</span>
-        </div>
-      )}
-      
       <div
         className={cn(
-          "rounded-2xl px-4 py-2 max-w-[80%] break-words",
-          isUser
-            ? "bg-blue-600 text-white rounded-tr-none"
-            : "bg-[#1e2634] text-white rounded-tl-none"
+          "flex gap-4",
+          isUser ? "justify-end" : "justify-start"
         )}
       >
-        <p className="whitespace-pre-wrap">{displayedContent}</p>
-        {!isUser && currentIndex < message.content.length && (
-          <span className="ml-1 inline-block w-1 h-4 bg-blue-400 animate-pulse"/>
+        {!isUser && (
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+            <span className="text-sm font-medium text-white">AI</span>
+          </div>
+        )}
+        
+        <div
+          className={cn(
+            "rounded-2xl px-4 py-3 max-w-full break-words",
+            isUser
+              ? "bg-blue-600 text-white"
+              : "bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700"
+          )}
+        >
+          <p className="whitespace-pre-wrap leading-relaxed">{displayedContent}</p>
+          {!isUser && currentIndex < message.content.length && (
+            <span className="ml-1 inline-block w-1 h-4 bg-blue-400 animate-pulse"/>
+          )}
+        </div>
+        
+        {isUser && (
+          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
+            <UserRound className="h-4 w-4 text-white" />
+          </div>
         )}
       </div>
-      
-      {isUser && (
-        <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0 shadow-md">
-          <UserRound className="h-5 w-5 text-white" />
+
+      {/* Action buttons for assistant messages */}
+      {!isUser && showActions && currentIndex >= message.content.length && (
+        <div className="flex items-center gap-1 mt-2 ml-12 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            onClick={handleCopy}
+          >
+            <Copy className="h-3 w-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-gray-500 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400"
+          >
+            <ThumbsUp className="h-3 w-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
+          >
+            <ThumbsDown className="h-3 w-3" />
+          </Button>
         </div>
       )}
     </div>
