@@ -98,7 +98,7 @@ const Index = () => {
               <MoreVertical className="w-5 h-5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="bg-white dark:bg-[#1a1f2c] border-gray-200 dark:border-gray-700">
-              <DropdownMenuItem onClick={handleClearChat} className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
+              <DropdownMenuItem onClick={handleClearChat} className="flex items-center gap-2 cursor-pointer bg-red-700">
                 <Trash2 className="w-4 h-4" />
                 <span>Limpar conversa</span>
               </DropdownMenuItem>
