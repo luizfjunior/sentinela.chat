@@ -34,6 +34,7 @@ const Index = () => {
     };
     setMessages(prev => [...prev, userMessage]);
     setLoading(true);
+
     try {
       const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-process-pd1245", {
         method: "POST",
@@ -45,11 +46,9 @@ const Index = () => {
         })
       });
 
-      // Get the response text first
       const responseText = await response.text();
       let assistantContent = "";
 
-      // Try to parse as JSON, if it fails, use the raw text
       try {
         if (responseText && responseText.trim()) {
           const data = JSON.parse(responseText);
@@ -58,12 +57,10 @@ const Index = () => {
           assistantContent = "Empty response from server.";
         }
       } catch (parseError) {
-        // If JSON parsing fails, use the raw text as the response
         console.log("Response is not JSON, using as plain text:", responseText);
         assistantContent = responseText || "Unknown response format.";
       }
 
-      // Add assistant response to chat
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         content: assistantContent,
@@ -78,6 +75,70 @@ const Index = () => {
       setLoading(false);
     }
   };
+
+  const handleSendAudio = async (audioBlob: Blob) => {
+    console.log("Sending audio:", audioBlob);
+    
+    // Add user message indicating audio was sent
+    const userMessage: Message = {
+      id: `user-${Date.now()}`,
+      content: "🎵 Áudio enviado",
+      role: "user",
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setLoading(true);
+
+    try {
+      // Convert blob to base64
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Audio = reader.result as string;
+        
+        const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-process-pd1245", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            audioData: base64Audio,
+            messageType: "audio"
+          })
+        });
+
+        const responseText = await response.text();
+        let assistantContent = "";
+
+        try {
+          if (responseText && responseText.trim()) {
+            const data = JSON.parse(responseText);
+            assistantContent = data.output || responseText;
+          } else {
+            assistantContent = "Áudio processado com sucesso.";
+          }
+        } catch (parseError) {
+          console.log("Response is not JSON, using as plain text:", responseText);
+          assistantContent = responseText || "Áudio recebido e processado.";
+        }
+
+        const assistantMessage: Message = {
+          id: `assistant-${Date.now()}`,
+          content: assistantContent,
+          role: "assistant",
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, assistantMessage]);
+      };
+      
+      reader.readAsDataURL(audioBlob);
+    } catch (error) {
+      console.error("Error sending audio:", error);
+      toast.error("Falha ao enviar áudio. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleClearChat = () => {
     setMessages([]);
     toast.success("Conversa limpa com sucesso!");
@@ -143,7 +204,11 @@ const Index = () => {
       {/* Chat Input */}
       <div className="sticky bottom-0 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 bg-red-50">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <ChatInput onSendMessage={handleSendMessage} isLoading={loading} />
+          <ChatInput 
+            onSendMessage={handleSendMessage} 
+            onSendAudio={handleSendAudio}
+            isLoading={loading} 
+          />
         </div>
       </div>
     </div>;
