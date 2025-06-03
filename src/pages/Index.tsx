@@ -36,7 +36,7 @@ const Index = () => {
     setLoading(true);
 
     try {
-      const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-process-pd1245", {
+      const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook-test/test-da1d-483e-9e67-8d5239f89133", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -95,7 +95,7 @@ const Index = () => {
       reader.onload = async () => {
         const base64Audio = reader.result as string;
         
-        const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-process-pd1245", {
+        const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook-test/test-da1d-483e-9e67-8d5239f89133", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
