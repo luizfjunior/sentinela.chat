@@ -113,8 +113,8 @@ const Index = () => {
           {messages.length === 0 ? <div className="flex items-center justify-center min-h-[60vh]">
               <div className="text-center max-w-xl mx-auto space-y-6 px-4">
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-600/10 border border-blue-200/20 dark:border-purple-500/20 bg-red-50">
-                  <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text mb-3 text-rose-600">👋 Olá! Seja bem-vindo ao Agente da Auditoria</h2>
-                  <p className="text-gray-600 dark:text-gray-400 text-lg">Vamos analisar de forma simples e detalhada os documentos fornecidos.</p>
+                  <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text mb-3 text-rose-600">👋 Olá! Seja bem-vindo ao Agente de Auditoria</h2>
+                  
                 </div>
                 
                 <div className="grid gap-3 mt-6">
