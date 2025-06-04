@@ -21,35 +21,42 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
   const [showActions, setShowActions] = useState(false);
   const isUser = message.role === "user";
 
+  // Process content to handle line breaks
+  const processContent = (content: string) => {
+    return content.replace(/\\n\\n/g, '\n\n').replace(/\\n/g, '\n');
+  };
+
+  const processedContent = processContent(message.content);
+
   // Typing animation for assistant messages
   useEffect(() => {
     if (isUser) {
-      setDisplayedContent(message.content);
+      setDisplayedContent(processedContent);
       return;
     }
 
-    if (currentIndex < message.content.length) {
+    if (currentIndex < processedContent.length) {
       const timeoutId = setTimeout(() => {
-        setDisplayedContent(message.content.slice(0, currentIndex + 1));
+        setDisplayedContent(processedContent.slice(0, currentIndex + 1));
         setCurrentIndex(currentIndex + 1);
       }, 15);
 
       return () => clearTimeout(timeoutId);
     }
-  }, [currentIndex, isUser, message.content]);
+  }, [currentIndex, isUser, processedContent]);
 
   useEffect(() => {
     if (isUser) {
-      setDisplayedContent(message.content);
+      setDisplayedContent(processedContent);
     } else {
       // Reset for new assistant messages
       setCurrentIndex(0);
       setDisplayedContent("");
     }
-  }, [message, isUser]);
+  }, [message, isUser, processedContent]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(message.content);
+    navigator.clipboard.writeText(processedContent);
   };
 
   return (
@@ -82,7 +89,7 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
           )}
         >
           <p className="whitespace-pre-wrap leading-relaxed">{displayedContent}</p>
-          {!isUser && currentIndex < message.content.length && (
+          {!isUser && currentIndex < processedContent.length && (
             <span className="ml-1 inline-block w-1 h-4 bg-blue-400 animate-pulse"/>
           )}
         </div>
@@ -95,7 +102,7 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
       </div>
 
       {/* Action buttons for assistant messages */}
-      {!isUser && showActions && currentIndex >= message.content.length && (
+      {!isUser && showActions && currentIndex >= processedContent.length && (
         <div className="flex items-center gap-1 mt-2 ml-12 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
             variant="ghost"
