@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { UserRound, Copy, ThumbsUp, ThumbsDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
   id: string;
@@ -88,7 +89,30 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
               : "bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700"
           )}
         >
-          <p className="whitespace-pre-wrap leading-relaxed">{displayedContent}</p>
+          {isUser ? (
+            <p className="whitespace-pre-wrap leading-relaxed">{displayedContent}</p>
+          ) : (
+            <div className="markdown-content">
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+                  h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-gray-900 dark:text-white">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-lg font-bold mb-2 text-gray-900 dark:text-white">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-gray-900 dark:text-white">{children}</h3>,
+                  strong: ({ children }) => <strong className="font-bold text-gray-900 dark:text-white">{children}</strong>,
+                  em: ({ children }) => <em className="italic">{children}</em>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4">{children}</ol>,
+                  ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4">{children}</ul>,
+                  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                  code: ({ children }) => <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded text-sm font-mono">{children}</code>,
+                  pre: ({ children }) => <pre className="bg-gray-100 dark:bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3">{children}</pre>,
+                  blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 italic mb-3">{children}</blockquote>,
+                }}
+              >
+                {displayedContent}
+              </ReactMarkdown>
+            </div>
+          )}
           {!isUser && currentIndex < processedContent.length && (
             <span className="ml-1 inline-block w-1 h-4 bg-blue-400 animate-pulse"/>
           )}
