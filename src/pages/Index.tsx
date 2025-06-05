@@ -4,24 +4,29 @@ import ChatInput from "../components/ChatInput";
 import { toast } from "sonner";
 import { Trash2, MoreVertical, MessageSquare } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
 interface Message {
   id: string;
   content: string;
   role: "user" | "assistant";
   timestamp: Date;
 }
+
 const Index = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth"
     });
   };
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
   const handleSendMessage = async (content: string) => {
     if (!content.trim()) return;
 
@@ -143,11 +148,17 @@ const Index = () => {
     setMessages([]);
     toast.success("Conversa limpa com sucesso!");
   };
+
   return <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#0f1218] text-gray-900 dark:text-white">
       {/* Header */}
       <header className="sticky top-0 z-50 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 bg-red-50">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <img 
+              src="/lovable-uploads/520fc95c-e051-4f07-aa0e-f271a3ba3386.png" 
+              alt="Grupo Oscar Logo" 
+              className="h-8 w-auto"
+            />
             <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600">
               <MessageSquare className="w-5 h-5 text-white" />
             </div>
@@ -213,4 +224,5 @@ const Index = () => {
       </div>
     </div>;
 };
+
 export default Index;
