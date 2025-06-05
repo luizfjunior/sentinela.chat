@@ -137,7 +137,7 @@ const Index = () => {
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/lovable-uploads/520fc95c-e051-4f07-aa0e-f271a3ba3386.png" alt="Grupo Oscar Logo" className="h-8 w-auto" />
-            <h1 className="text-lg text-gray-200 font-extrabold mx-[240px] text-center">Sentinela</h1>
+            <h1 className="mx-[240px] text-center text-2xl font-medium text-zinc-300 my-0 py-0 px-0">SENTINELA</h1>
           </div>
           
           <DropdownMenu>
