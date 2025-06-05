@@ -81,32 +81,25 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
           </div>
         )}
         
-        <div
-          className={cn(
-            "rounded-2xl px-4 py-3 max-w-full break-words",
-            isUser
-              ? "bg-blue-600 text-white"
-              : "bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700"
-          )}
-        >
+        <div className="max-w-full break-words">
           {isUser ? (
-            <p className="whitespace-pre-wrap leading-relaxed">{displayedContent}</p>
+            <p className="whitespace-pre-wrap leading-relaxed text-white">{displayedContent}</p>
           ) : (
-            <div className="markdown-content">
+            <div className="markdown-content text-white">
               <ReactMarkdown
                 components={{
-                  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
-                  h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-gray-900 dark:text-white">{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-lg font-bold mb-2 text-gray-900 dark:text-white">{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-gray-900 dark:text-white">{children}</h3>,
-                  strong: ({ children }) => <strong className="font-bold text-gray-900 dark:text-white">{children}</strong>,
-                  em: ({ children }) => <em className="italic">{children}</em>,
-                  ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4">{children}</ol>,
-                  ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4">{children}</ul>,
-                  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                  code: ({ children }) => <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded text-sm font-mono">{children}</code>,
-                  pre: ({ children }) => <pre className="bg-gray-100 dark:bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3">{children}</pre>,
-                  blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 italic mb-3">{children}</blockquote>,
+                  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-white">{children}</p>,
+                  h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-white">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-lg font-bold mb-2 text-white">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-white">{children}</h3>,
+                  strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
+                  em: ({ children }) => <em className="italic text-white">{children}</em>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4 text-white">{children}</ol>,
+                  ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4 text-white">{children}</ul>,
+                  li: ({ children }) => <li className="leading-relaxed text-white">{children}</li>,
+                  code: ({ children }) => <code className="bg-gray-700 px-1 py-0.5 rounded text-sm font-mono text-white">{children}</code>,
+                  pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3 text-white">{children}</pre>,
+                  blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic mb-3 text-white">{children}</blockquote>,
                 }}
               >
                 {displayedContent}
@@ -131,7 +124,7 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 px-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="h-8 px-2 text-gray-400 hover:text-gray-200"
             onClick={handleCopy}
           >
             <Copy className="h-3 w-3" />
@@ -139,14 +132,14 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 px-2 text-gray-500 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400"
+            className="h-8 px-2 text-gray-400 hover:text-green-400"
           >
             <ThumbsUp className="h-3 w-3" />
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 px-2 text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
+            className="h-8 px-2 text-gray-400 hover:text-red-400"
           >
             <ThumbsDown className="h-3 w-3" />
           </Button>

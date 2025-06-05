@@ -4,24 +4,29 @@ import ChatInput from "../components/ChatInput";
 import { toast } from "sonner";
 import { Trash2, MoreVertical, MessageSquare } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
 interface Message {
   id: string;
   content: string;
   role: "user" | "assistant";
   timestamp: Date;
 }
+
 const Index = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth"
     });
   };
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
   const handleSendMessage = async (content: string) => {
     if (!content.trim()) return;
 
@@ -34,6 +39,7 @@ const Index = () => {
     };
     setMessages(prev => [...prev, userMessage]);
     setLoading(true);
+
     try {
       const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
         method: "POST",
@@ -44,8 +50,10 @@ const Index = () => {
           message: content
         })
       });
+
       const responseText = await response.text();
       let assistantContent = "";
+
       try {
         if (responseText && responseText.trim()) {
           const data = JSON.parse(responseText);
@@ -57,6 +65,7 @@ const Index = () => {
         console.log("Response is not JSON, using as plain text:", responseText);
         assistantContent = responseText || "Unknown response format.";
       }
+
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         content: assistantContent,
@@ -71,6 +80,7 @@ const Index = () => {
       setLoading(false);
     }
   };
+
   const handleSendAudio = async (audioBlob: Blob) => {
     console.log("Sending audio:", audioBlob);
 
@@ -83,6 +93,7 @@ const Index = () => {
     };
     setMessages(prev => [...prev, userMessage]);
     setLoading(true);
+
     try {
       // Convert blob to base64
       const reader = new FileReader();
@@ -98,8 +109,10 @@ const Index = () => {
             messageType: "audio"
           })
         });
+
         const responseText = await response.text();
         let assistantContent = "";
+
         try {
           if (responseText && responseText.trim()) {
             const data = JSON.parse(responseText);
@@ -111,6 +124,7 @@ const Index = () => {
           console.log("Response is not JSON, using as plain text:", responseText);
           assistantContent = responseText || "Áudio recebido e processado.";
         }
+
         const assistantMessage: Message = {
           id: `assistant-${Date.now()}`,
           content: assistantContent,
@@ -127,18 +141,24 @@ const Index = () => {
       setLoading(false);
     }
   };
+
   const handleClearChat = () => {
     setMessages([]);
     toast.success("Conversa limpa com sucesso!");
   };
-  return <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#0f1218] text-gray-900 dark:text-white">
+
+  return (
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#0f1218] text-gray-900 dark:text-white">
       {/* Header */}
       <header className="sticky top-0 z-50 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 bg-zinc-700">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/lovable-uploads/520fc95c-e051-4f07-aa0e-f271a3ba3386.png" alt="Grupo Oscar Logo" className="h-8 w-auto" />
-            
-            <h1 className="text-lg text-gray-200 font-extrabold px-[240px]">Sentinela</h1>
+            <img 
+              src="/lovable-uploads/520fc95c-e051-4f07-aa0e-f271a3ba3386.png" 
+              alt="Grupo Oscar Logo" 
+              className="h-8 w-auto" 
+            />
+            <h1 className="text-lg text-gray-200 font-extrabold">Sentinela</h1>
           </div>
           
           <DropdownMenu>
@@ -158,22 +178,21 @@ const Index = () => {
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto bg-zinc-900">
         <div className="max-w-4xl mx-auto px-4">
-          {messages.length === 0 ? <div className="flex items-center justify-center min-h-[60vh]">
+          {messages.length === 0 ? (
+            <div className="flex items-center justify-center min-h-[60vh]">
               <div className="text-center max-w-xl mx-auto space-y-6 px-4">
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-600/10 border border-blue-200/20 dark:border-purple-500/20 bg-zinc-800">
                   <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text mb-3 text-slate-200">Bem-vindo ao Agente de Auditoria</h2>
-                  
-                </div>
-                
-                <div className="grid gap-3 mt-6">
-                  
-                  
-                  
                 </div>
               </div>
-            </div> : <div className="py-6 space-y-6">
-              {messages.map(message => <ChatMessage key={message.id} message={message} />)}
-              {loading && <div className="flex items-start gap-4">
+            </div>
+          ) : (
+            <div className="py-6 space-y-6">
+              {messages.map(message => (
+                <ChatMessage key={message.id} message={message} />
+              ))}
+              {loading && (
+                <div className="flex items-start gap-4">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
                     <span className="text-sm font-medium text-white">AI</span>
                   </div>
@@ -182,8 +201,10 @@ const Index = () => {
                     <span></span>
                     <span></span>
                   </div>
-                </div>}
-            </div>}
+                </div>
+              )}
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -191,9 +212,15 @@ const Index = () => {
       {/* Chat Input */}
       <div className="sticky bottom-0 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 bg-zinc-700">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <ChatInput onSendMessage={handleSendMessage} onSendAudio={handleSendAudio} isLoading={loading} />
+          <ChatInput 
+            onSendMessage={handleSendMessage} 
+            onSendAudio={handleSendAudio} 
+            isLoading={loading} 
+          />
         </div>
       </div>
-    </div>;
+    </div>
+  );
 };
+
 export default Index;
