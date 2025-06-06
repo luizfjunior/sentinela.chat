@@ -87,7 +87,13 @@ export const useSupabaseConversations = () => {
         return;
       }
 
-      setMessages(data || []);
+      // Type assertion to ensure role is properly typed
+      const typedMessages = (data || []).map(msg => ({
+        ...msg,
+        role: msg.role as 'user' | 'assistant'
+      }));
+
+      setMessages(typedMessages);
     } catch (error) {
       console.error('Error loading messages:', error);
       toast.error('Erro ao carregar mensagens');
