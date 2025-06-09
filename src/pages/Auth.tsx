@@ -73,14 +73,14 @@ const Auth = () => {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <img src="/lovable-uploads/520fc95c-e051-4f07-aa0e-f271a3ba3386.png" alt="Grupo Oscar Logo" className="h-12 w-auto mx-auto mb-4" />
-          <h1 className="text-white mb-2 text-2xl font-medium">SENTINELA</h1>
+          <img alt="Grupo Oscar Logo" src="/lovable-uploads/02347520-a11f-464a-bc70-ce3235b73f55.jpg" className="<img src=\"/logo.png\" class=\"mix-blend-screen\" />" />
+          
           
         </div>
 
         <Card className="bg-zinc-800 border-zinc-700">
           <CardHeader>
-            <CardTitle className="text-white text-center">Acesso ao Chat</CardTitle>
+            <CardTitle className="text-white text-center">Acesso ao Sentinela </CardTitle>
             <CardDescription className="text-zinc-400 text-center">Entre com uma conta autorizada</CardDescription>
           </CardHeader>
           <CardContent>
