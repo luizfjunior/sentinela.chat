@@ -14,16 +14,12 @@ interface Message {
 
 interface ChatMessageProps {
   message: Message;
-  isNewMessage?: boolean;
 }
 
-const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
+const ChatMessage = ({ message }: ChatMessageProps) => {
   const [displayedContent, setDisplayedContent] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showActions, setShowActions] = useState(false);
-  const [isThinking, setIsThinking] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
-  const [showThinkingDots, setShowThinkingDots] = useState(true);
   const isUser = message.role === "user";
 
   // Process content to handle line breaks
@@ -33,87 +29,32 @@ const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
 
   const processedContent = processContent(message.content);
 
-  // Initialize animation sequence for new assistant messages
+  // Typing animation for assistant messages
   useEffect(() => {
-    if (isUser || !isNewMessage) {
+    if (isUser) {
       setDisplayedContent(processedContent);
-      setIsThinking(false);
-      setIsTyping(false);
-      return;
-    }
-
-    // Start thinking phase
-    setIsThinking(true);
-    setIsTyping(false);
-    setCurrentIndex(0);
-    setDisplayedContent("");
-
-    // Thinking dots animation
-    const thinkingInterval = setInterval(() => {
-      setShowThinkingDots(prev => !prev);
-    }, 500);
-
-    // After thinking phase, start typing
-    const thinkingTimeout = setTimeout(() => {
-      setIsThinking(false);
-      setIsTyping(true);
-      clearInterval(thinkingInterval);
-    }, 800); // 800ms thinking phase
-
-    return () => {
-      clearTimeout(thinkingTimeout);
-      clearInterval(thinkingInterval);
-    };
-  }, [message, isUser, processedContent, isNewMessage]);
-
-  // Typing animation effect
-  useEffect(() => {
-    if (isUser || !isNewMessage || !isTyping) {
       return;
     }
 
     if (currentIndex < processedContent.length) {
-      const char = processedContent[currentIndex];
-      // Variable speed: slower for punctuation, faster for spaces
-      const delay = char === '.' || char === '!' || char === '?' ? 100 : 
-                   char === ',' || char === ';' ? 80 : 
-                   char === ' ' ? 30 : 20;
-
       const timeoutId = setTimeout(() => {
         setDisplayedContent(processedContent.slice(0, currentIndex + 1));
         setCurrentIndex(currentIndex + 1);
-      }, delay);
+      }, 15);
 
       return () => clearTimeout(timeoutId);
-    } else {
-      // Typing completed
-      setIsTyping(false);
     }
-  }, [currentIndex, isUser, processedContent, isNewMessage, isTyping]);
+  }, [currentIndex, isUser, processedContent]);
 
-  // Thinking dots component
-  const ThinkingDots = () => (
-    <div className="flex items-center gap-1">
-      <span 
-        className={cn(
-          "w-1 h-1 bg-blue-400 rounded-full transition-opacity duration-300",
-          showThinkingDots ? "opacity-100" : "opacity-30"
-        )}
-      />
-      <span 
-        className={cn(
-          "w-1 h-1 bg-blue-400 rounded-full transition-opacity duration-300 delay-100",
-          showThinkingDots ? "opacity-100" : "opacity-30"
-        )}
-      />
-      <span 
-        className={cn(
-          "w-1 h-1 bg-blue-400 rounded-full transition-opacity duration-300 delay-200",
-          showThinkingDots ? "opacity-100" : "opacity-30"
-        )}
-      />
-    </div>
-  );
+  useEffect(() => {
+    if (isUser) {
+      setDisplayedContent(processedContent);
+    } else {
+      // Reset for new assistant messages
+      setCurrentIndex(0);
+      setDisplayedContent("");
+    }
+  }, [message, isUser, processedContent]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(processedContent);
@@ -145,33 +86,27 @@ const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
             <p className="whitespace-pre-wrap leading-relaxed text-white">{displayedContent}</p>
           ) : (
             <div className="markdown-content text-white">
-              {isThinking ? (
-                <div className="flex items-center gap-2 py-2">
-                  <ThinkingDots />
-                </div>
-              ) : (
-                <ReactMarkdown
-                  components={{
-                    p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-white">{children}</p>,
-                    h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-white">{children}</h1>,
-                    h2: ({ children }) => <h2 className="text-lg font-bold mb-2 text-white">{children}</h2>,
-                    h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-white">{children}</h3>,
-                    strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
-                    em: ({ children }) => <em className="italic text-white">{children}</em>,
-                    ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4 text-white">{children}</ol>,
-                    ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4 text-white">{children}</ul>,
-                    li: ({ children }) => <li className="leading-relaxed text-white">{children}</li>,
-                    code: ({ children }) => <code className="bg-gray-700 px-1 py-0.5 rounded text-sm font-mono text-white">{children}</code>,
-                    pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3 text-white">{children}</pre>,
-                    blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic mb-3 text-white">{children}</blockquote>,
-                  }}
-                >
-                  {displayedContent}
-                </ReactMarkdown>
-              )}
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-white">{children}</p>,
+                  h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-white">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-lg font-bold mb-2 text-white">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-white">{children}</h3>,
+                  strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
+                  em: ({ children }) => <em className="italic text-white">{children}</em>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4 text-white">{children}</ol>,
+                  ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4 text-white">{children}</ul>,
+                  li: ({ children }) => <li className="leading-relaxed text-white">{children}</li>,
+                  code: ({ children }) => <code className="bg-gray-700 px-1 py-0.5 rounded text-sm font-mono text-white">{children}</code>,
+                  pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3 text-white">{children}</pre>,
+                  blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic mb-3 text-white">{children}</blockquote>,
+                }}
+              >
+                {displayedContent}
+              </ReactMarkdown>
             </div>
           )}
-          {!isUser && isNewMessage && (isTyping || currentIndex < processedContent.length) && (
+          {!isUser && currentIndex < processedContent.length && (
             <span className="ml-1 inline-block w-1 h-4 bg-blue-400 animate-pulse"/>
           )}
         </div>
@@ -184,7 +119,7 @@ const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
       </div>
 
       {/* Action buttons for assistant messages */}
-      {!isUser && showActions && (!isNewMessage || (!isThinking && !isTyping && currentIndex >= processedContent.length)) && (
+      {!isUser && showActions && currentIndex >= processedContent.length && (
         <div className="flex items-center gap-1 mt-2 ml-12 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
             variant="ghost"

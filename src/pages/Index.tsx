@@ -39,20 +39,6 @@ const Index = () => {
     role: msg.role as "user" | "assistant",
     timestamp: new Date(msg.created_at)
   })), ...localMessages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-
-  // Identify the last assistant message being generated
-  const getLastGeneratingMessageId = () => {
-    if (loading && localMessages.length > 0) {
-      const lastMessage = localMessages[localMessages.length - 1];
-      if (lastMessage.role === "assistant") {
-        return lastMessage.id;
-      }
-    }
-    return null;
-  };
-
-  const lastGeneratingMessageId = getLastGeneratingMessageId();
-
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth"
@@ -242,12 +228,8 @@ const Index = () => {
                 </div>
               </div>
             </div> : <div className="py-6 space-y-6">
-              {allMessages.map(message => <ChatMessage 
-                key={message.id} 
-                message={message} 
-                isNewMessage={message.id === lastGeneratingMessageId}
-              />)}
-              {loading && localMessages.length === 0 && <div className="flex items-start gap-4">
+              {allMessages.map(message => <ChatMessage key={message.id} message={message} />)}
+              {loading && <div className="flex items-start gap-4">
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
                     <span className="text-sm font-medium text-white">AI</span>
                   </div>
