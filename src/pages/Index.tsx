@@ -7,14 +7,12 @@ import Sidebar from "../components/Sidebar";
 import UserProfile from "../components/UserProfile";
 import { toast } from "sonner";
 import { useSidebar } from "../hooks/useSidebar";
-
 interface LocalMessage {
   id: string;
   content: string;
   role: "user" | "assistant";
   timestamp: Date;
 }
-
 const Index = () => {
   const {
     user
@@ -211,7 +209,7 @@ const Index = () => {
       <header className="sticky top-0 z-10 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 bg-zinc-700">
         <div className="max-w-4xl mx-auto flex items-center justify-between px-0 py-[13px]">
           <div className="flex items-center gap-3 ml-12">
-            <img src="/lovable-uploads/520fc95c-e051-4f07-aa0e-f271a3ba3386.png" alt="Grupo Oscar Logo" className="mix-blend-screen w-24 h-auto mx-auto" />
+            <img alt="Grupo Oscar Logo" src="/lovable-uploads/8d123358-879a-4bd0-8c59-94020f57ed0c.jpg" className="mix-blend-screen w-24 h-auto mx-auto object-fill" />
           </div>
           
           <UserProfile />
@@ -254,5 +252,4 @@ const Index = () => {
       </div>
     </div>;
 };
-
 export default Index;
