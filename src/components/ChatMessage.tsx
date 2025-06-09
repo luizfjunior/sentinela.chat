@@ -14,12 +14,15 @@ interface Message {
 
 interface ChatMessageProps {
   message: Message;
+  isNewMessage?: boolean;
 }
 
-const ChatMessage = ({ message }: ChatMessageProps) => {
+const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
   const [displayedContent, setDisplayedContent] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showActions, setShowActions] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const isUser = message.role === "user";
 
   // Process content to handle line breaks
@@ -29,36 +32,61 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
 
   const processedContent = processContent(message.content);
 
-  // Typing animation for assistant messages
+  // Typing animation for new assistant messages only
   useEffect(() => {
-    if (isUser) {
+    if (isUser || !isNewMessage) {
       setDisplayedContent(processedContent);
       return;
     }
 
+    // Start with thinking phase for new messages
+    setIsThinking(true);
+    setIsTyping(false);
+    setDisplayedContent("");
+    setCurrentIndex(0);
+
+    // Show thinking dots for 800ms
+    const thinkingTimer = setTimeout(() => {
+      setIsThinking(false);
+      setIsTyping(true);
+    }, 800);
+
+    return () => clearTimeout(thinkingTimer);
+  }, [message, isUser, processedContent, isNewMessage]);
+
+  // Handle typing animation
+  useEffect(() => {
+    if (!isTyping || isUser || !isNewMessage) return;
+
     if (currentIndex < processedContent.length) {
+      const char = processedContent[currentIndex];
+      // Variable speed: slower for punctuation, faster for spaces
+      const delay = char === '.' || char === '!' || char === '?' ? 100 : 
+                   char === ',' || char === ';' ? 80 : 
+                   char === ' ' ? 10 : 20;
+
       const timeoutId = setTimeout(() => {
         setDisplayedContent(processedContent.slice(0, currentIndex + 1));
         setCurrentIndex(currentIndex + 1);
-      }, 15);
+      }, delay);
 
       return () => clearTimeout(timeoutId);
-    }
-  }, [currentIndex, isUser, processedContent]);
-
-  useEffect(() => {
-    if (isUser) {
-      setDisplayedContent(processedContent);
     } else {
-      // Reset for new assistant messages
-      setCurrentIndex(0);
-      setDisplayedContent("");
+      setIsTyping(false);
     }
-  }, [message, isUser, processedContent]);
+  }, [currentIndex, isTyping, isUser, processedContent, isNewMessage]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(processedContent);
   };
+
+  const renderThinkingDots = () => (
+    <div className="flex items-center space-x-1">
+      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
+      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
+      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
+    </div>
+  );
 
   return (
     <div
@@ -76,8 +104,12 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
         )}
       >
         {!isUser && (
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
-            <span className="text-sm font-medium text-white">AI</span>
+          <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0">
+            <img 
+              src="/lovable-uploads/iconeIA.jpg" 
+              alt="IA" 
+              className="w-full h-full object-cover"
+            />
           </div>
         )}
         
@@ -86,28 +118,32 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
             <p className="whitespace-pre-wrap leading-relaxed text-white">{displayedContent}</p>
           ) : (
             <div className="markdown-content text-white">
-              <ReactMarkdown
-                components={{
-                  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-white">{children}</p>,
-                  h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-white">{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-lg font-bold mb-2 text-white">{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-white">{children}</h3>,
-                  strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
-                  em: ({ children }) => <em className="italic text-white">{children}</em>,
-                  ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4 text-white">{children}</ol>,
-                  ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4 text-white">{children}</ul>,
-                  li: ({ children }) => <li className="leading-relaxed text-white">{children}</li>,
-                  code: ({ children }) => <code className="bg-gray-700 px-1 py-0.5 rounded text-sm font-mono text-white">{children}</code>,
-                  pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3 text-white">{children}</pre>,
-                  blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic mb-3 text-white">{children}</blockquote>,
-                }}
-              >
-                {displayedContent}
-              </ReactMarkdown>
+              {isThinking ? (
+                renderThinkingDots()
+              ) : (
+                <ReactMarkdown
+                  components={{
+                    p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-white">{children}</p>,
+                    h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-white">{children}</h1>,
+                    h2: ({ children }) => <h2 className="text-lg font-bold mb-2 text-white">{children}</h2>,
+                    h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-white">{children}</h3>,
+                    strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
+                    em: ({ children }) => <em className="italic text-white">{children}</em>,
+                    ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4 text-white">{children}</ol>,
+                    ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4 text-white">{children}</ul>,
+                    li: ({ children }) => <li className="leading-relaxed text-white">{children}</li>,
+                    code: ({ children }) => <code className="bg-gray-700 px-1 py-0.5 rounded text-sm font-mono text-white">{children}</code>,
+                    pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3 text-white">{children}</pre>,
+                    blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic mb-3 text-white">{children}</blockquote>,
+                  }}
+                >
+                  {displayedContent}
+                </ReactMarkdown>
+              )}
+              {isTyping && (
+                <span className="ml-1 inline-block w-1 h-4 bg-blue-400 animate-pulse"/>
+              )}
             </div>
-          )}
-          {!isUser && currentIndex < processedContent.length && (
-            <span className="ml-1 inline-block w-1 h-4 bg-blue-400 animate-pulse"/>
           )}
         </div>
         
@@ -119,7 +155,7 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
       </div>
 
       {/* Action buttons for assistant messages */}
-      {!isUser && showActions && currentIndex >= processedContent.length && (
+      {!isUser && showActions && !isThinking && !isTyping && (
         <div className="flex items-center gap-1 mt-2 ml-12 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
             variant="ghost"
