@@ -14,9 +14,10 @@ interface Message {
 
 interface ChatMessageProps {
   message: Message;
+  isNewMessage?: boolean;
 }
 
-const ChatMessage = ({ message }: ChatMessageProps) => {
+const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
   const [displayedContent, setDisplayedContent] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showActions, setShowActions] = useState(false);
@@ -29,9 +30,9 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
 
   const processedContent = processContent(message.content);
 
-  // Typing animation for assistant messages
+  // Typing animation for assistant messages - only for new messages
   useEffect(() => {
-    if (isUser) {
+    if (isUser || !isNewMessage) {
       setDisplayedContent(processedContent);
       return;
     }
@@ -44,17 +45,17 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
 
       return () => clearTimeout(timeoutId);
     }
-  }, [currentIndex, isUser, processedContent]);
+  }, [currentIndex, isUser, processedContent, isNewMessage]);
 
   useEffect(() => {
-    if (isUser) {
+    if (isUser || !isNewMessage) {
       setDisplayedContent(processedContent);
     } else {
       // Reset for new assistant messages
       setCurrentIndex(0);
       setDisplayedContent("");
     }
-  }, [message, isUser, processedContent]);
+  }, [message, isUser, processedContent, isNewMessage]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(processedContent);
@@ -106,7 +107,7 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
               </ReactMarkdown>
             </div>
           )}
-          {!isUser && currentIndex < processedContent.length && (
+          {!isUser && isNewMessage && currentIndex < processedContent.length && (
             <span className="ml-1 inline-block w-1 h-4 bg-blue-400 animate-pulse"/>
           )}
         </div>
@@ -119,7 +120,7 @@ const ChatMessage = ({ message }: ChatMessageProps) => {
       </div>
 
       {/* Action buttons for assistant messages */}
-      {!isUser && showActions && currentIndex >= processedContent.length && (
+      {!isUser && showActions && (!isNewMessage || currentIndex >= processedContent.length) && (
         <div className="flex items-center gap-1 mt-2 ml-12 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
             variant="ghost"
