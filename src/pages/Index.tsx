@@ -99,11 +99,14 @@ const Index = () => {
         await updateConversationTitle(convId, title);
       }
 
-      // Send message to API
+      // Send message to API with user_id
       const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: content })
+        body: JSON.stringify({ 
+          message: content,
+          user_id: user.id
+        })
       });
 
       const responseText = await response.text();
@@ -177,7 +180,8 @@ const Index = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             audioData: base64Audio,
-            messageType: "audio"
+            messageType: "audio",
+            user_id: user.id
           })
         });
 

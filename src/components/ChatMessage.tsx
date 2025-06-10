@@ -1,8 +1,7 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { UserRound, Copy, ThumbsUp, ThumbsDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { UserRound } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 
 interface Message {
@@ -20,7 +19,6 @@ interface ChatMessageProps {
 const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
   const [displayedContent, setDisplayedContent] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [showActions, setShowActions] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const isUser = message.role === "user";
@@ -76,10 +74,6 @@ const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
     }
   }, [currentIndex, isTyping, isUser, processedContent, isNewMessage]);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(processedContent);
-  };
-
   const renderThinkingDots = () => (
     <div className="flex items-center space-x-1">
       <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
@@ -94,8 +88,6 @@ const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
         "group relative",
         isUser ? "ml-auto max-w-[80%]" : "mr-auto max-w-full"
       )}
-      onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => setShowActions(false)}
     >
       <div
         className={cn(
@@ -153,34 +145,6 @@ const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
           </div>
         )}
       </div>
-
-      {/* Action buttons for assistant messages */}
-      {!isUser && showActions && !isThinking && !isTyping && (
-        <div className="flex items-center gap-1 mt-2 ml-12 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-gray-400 hover:text-gray-200"
-            onClick={handleCopy}
-          >
-            <Copy className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-gray-400 hover:text-green-400"
-          >
-            <ThumbsUp className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-gray-400 hover:text-red-400"
-          >
-            <ThumbsDown className="h-3 w-3" />
-          </Button>
-        </div>
-      )}
     </div>
   );
 };

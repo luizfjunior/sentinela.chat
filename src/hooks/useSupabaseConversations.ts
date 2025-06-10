@@ -139,14 +139,28 @@ export const useSupabaseConversations = () => {
     if (!user) return;
 
     try {
-      const { error } = await supabase
+      // First delete all messages in the conversation
+      const { error: messagesError } = await supabase
+        .from('messages')
+        .delete()
+        .eq('conversation_id', conversationId)
+        .eq('user_id', user.id);
+
+      if (messagesError) {
+        console.error('Error deleting messages:', messagesError);
+        toast.error('Erro ao excluir mensagens da conversa');
+        return;
+      }
+
+      // Then delete the conversation
+      const { error: conversationError } = await supabase
         .from('conversations')
         .delete()
         .eq('id', conversationId)
         .eq('user_id', user.id);
 
-      if (error) {
-        console.error('Error deleting conversation:', error);
+      if (conversationError) {
+        console.error('Error deleting conversation:', conversationError);
         toast.error('Erro ao excluir conversa');
         return;
       }
