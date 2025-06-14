@@ -1,4 +1,5 @@
 
+
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { UserRound } from "lucide-react";
@@ -132,9 +133,6 @@ const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
                   {displayedContent}
                 </ReactMarkdown>
               )}
-              {isTyping && (
-                <span className="ml-1 inline-block w-1 h-4 bg-blue-400 animate-pulse"/>
-              )}
             </div>
           )}
         </div>
@@ -150,3 +148,4 @@ const ChatMessage = ({ message, isNewMessage = false }: ChatMessageProps) => {
 };
 
 export default ChatMessage;
+
