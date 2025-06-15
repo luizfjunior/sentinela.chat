@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSupabaseConversations } from "@/hooks/useSupabaseConversations";
@@ -66,10 +67,6 @@ const Index = () => {
 
   const handleDeleteConversation = (id: string) => {
     deleteConversation(id);
-  };
-
-  const handleRenameConversation = (id: string, newTitle: string) => {
-    updateConversationTitle(id, newTitle);
   };
 
   const handleSendMessage = async (content: string) => {
@@ -237,7 +234,6 @@ const Index = () => {
         onNewChat={handleNewChat} 
         onSelectConversation={handleSelectConversation} 
         onDeleteConversation={handleDeleteConversation} 
-        onRenameConversation={handleRenameConversation}
       />
 
       {/* Header */}
