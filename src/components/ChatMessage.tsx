@@ -79,7 +79,7 @@ const ChatMessage = ({
   return (
     <div className={cn("group relative", isUser ? "ml-auto max-w-[80%]" : "mr-auto max-w-full")}>
       <div className={cn("flex gap-4", isUser ? "justify-end" : "justify-start")}>
-        {/* Avatar sempre visível do lado da IA */}
+        {/* Avatar sempre visível do lado da IA, junto com thinking/texto */}
         {!isUser && (
           <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0">
             <img
@@ -97,8 +97,15 @@ const ChatMessage = ({
             <p className="whitespace-pre-wrap leading-relaxed text-white">{displayedContent}</p>
           ) : (
             <div className="markdown-content text-white">
+              {/* thinking Dots */}
               {isThinking
-                ? renderThinkingDots()
+                ? (
+                  <div className="flex items-center space-x-1">
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
+                  </div>
+                )
                 : (
                   <ReactMarkdown components={{
                     p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-white">{children}</p>,
