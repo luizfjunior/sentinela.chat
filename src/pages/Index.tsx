@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSupabaseConversations } from "@/hooks/useSupabaseConversations";
@@ -309,15 +308,13 @@ const Index = () => {
       </header>
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto bg-zinc-900">
-        <div className="max-w-4xl mx-auto px-4">
+        <div className="max-w-4xl mx-auto px-4 flex flex-col h-full">
           {messages.length === 0 ? (
-            <div className="flex items-center justify-center min-h-[60vh]">
-              <div className="text-center max-w-xl mx-auto space-y-6 px-4">
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-600/10 border border-blue-200/20 dark:border-purple-500/20 bg-zinc-800">
-                  <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text mb-3 text-slate-200">
-                    Bem-vindo ao Agente Anti-Fraude!
-                  </h2>
-                </div>
+            <div className="flex-1 flex flex-col justify-end">
+              <div className="text-center mb-6">
+                <span className="text-lg text-slate-200 font-medium">
+                  Bem-vindo ao Agente Anti-Fraude!
+                </span>
               </div>
             </div>
           ) : (
