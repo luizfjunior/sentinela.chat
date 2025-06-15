@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSupabaseConversations } from "@/hooks/useSupabaseConversations";
@@ -19,6 +20,7 @@ const Index = () => {
   const { user } = useAuth();
   const [localMessages, setLocalMessages] = useState<LocalMessage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
   const [lastGeneratedMessageId, setLastGeneratedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sidebar = useSidebar();
@@ -31,10 +33,11 @@ const Index = () => {
     deleteConversation,
     saveMessage,
     updateConversationTitle,
-    setCurrentConversationId
+    setCurrentConversationId,
+    loadConversations
   } = useSupabaseConversations();
 
-  // Combine local messages with supabase messages for display
+  // Use only supabase messages and local temporary messages (for AI responses)
   const allMessages = [...supabaseMessages.map(msg => ({
     id: msg.id,
     content: msg.content,
@@ -81,32 +84,33 @@ const Index = () => {
   const handleSendMessage = async (content: string) => {
     if (!content.trim() || !user) return;
 
-    // Create or get conversation
-    let convId = currentConversationId;
-    if (!convId) {
-      convId = await createNewConversation(content);
-      if (!convId) return;
-    }
-
-    // Add user message to local state immediately
-    const userMessage: LocalMessage = {
-      id: `user-${Date.now()}`,
-      content,
-      role: "user",
-      timestamp: new Date()
-    };
-    setLocalMessages(prev => [...prev, userMessage]);
-    setLoading(true);
+    setSendingMessage(true);
 
     try {
-      // Save user message to database
+      // Create or get conversation
+      let convId = currentConversationId;
+      if (!convId) {
+        convId = await createNewConversation(content);
+        if (!convId) {
+          setSendingMessage(false);
+          return;
+        }
+      }
+
+      // Save user message to database first
       await saveMessage(convId, content, 'user');
 
       // Update conversation title if this is the first message
-      if (supabaseMessages.length === 0 && localMessages.length === 0) {
+      if (supabaseMessages.length === 0) {
         const title = content.split(' ').slice(0, 3).join(' ') + '...';
         await updateConversationTitle(convId, title);
       }
+
+      // Reload conversations to get the updated message list
+      await loadConversations();
+
+      setSendingMessage(false);
+      setLoading(true);
 
       // Send message to API with user_id
       const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
@@ -133,7 +137,7 @@ const Index = () => {
         assistantContent = responseText || "Unknown response format.";
       }
 
-      // Add assistant message to local state
+      // Add assistant message to local state for typing animation
       const assistantMessageId = `assistant-${Date.now()}`;
       const assistantMessage: LocalMessage = {
         id: assistantMessageId,
@@ -150,6 +154,7 @@ const Index = () => {
     } catch (error) {
       console.error("Error sending message:", error);
       toast.error("Failed to send message. Please try again.");
+      setSendingMessage(false);
     } finally {
       setLoading(false);
     }
@@ -159,26 +164,27 @@ const Index = () => {
     if (!user) return;
     console.log("Sending audio:", audioBlob);
 
-    // Create or get conversation
-    let convId = currentConversationId;
-    if (!convId) {
-      convId = await createNewConversation("🎵 Áudio enviado");
-      if (!convId) return;
-    }
-
-    // Add user message indicating audio was sent
-    const userMessage: LocalMessage = {
-      id: `user-${Date.now()}`,
-      content: "🎵 Áudio enviado",
-      role: "user",
-      timestamp: new Date()
-    };
-    setLocalMessages(prev => [...prev, userMessage]);
-    setLoading(true);
+    setSendingMessage(true);
 
     try {
-      // Save user message to database
+      // Create or get conversation
+      let convId = currentConversationId;
+      if (!convId) {
+        convId = await createNewConversation("🎵 Áudio enviado");
+        if (!convId) {
+          setSendingMessage(false);
+          return;
+        }
+      }
+
+      // Save user message to database first
       await saveMessage(convId, "🎵 Áudio enviado", 'user');
+
+      // Reload conversations to get the updated message list
+      await loadConversations();
+
+      setSendingMessage(false);
+      setLoading(true);
 
       // Convert blob to base64
       const reader = new FileReader();
@@ -222,12 +228,13 @@ const Index = () => {
 
         // Save assistant message to database
         await saveMessage(convId!, assistantContent, 'assistant');
+        setLoading(false);
       };
       reader.readAsDataURL(audioBlob);
     } catch (error) {
       console.error("Error sending audio:", error);
       toast.error("Falha ao enviar áudio. Tente novamente.");
-    } finally {
+      setSendingMessage(false);
       setLoading(false);
     }
   };
@@ -263,7 +270,7 @@ const Index = () => {
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto bg-zinc-900">
         <div className="max-w-4xl mx-auto px-4">
-          {allMessages.length === 0 ? (
+          {allMessages.length === 0 && !sendingMessage ? (
             <div className="flex items-center justify-center min-h-[60vh]">
               <div className="text-center max-w-xl mx-auto space-y-6 px-4">
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-600/10 border border-blue-200/20 dark:border-purple-500/20 bg-zinc-800">
@@ -282,6 +289,16 @@ const Index = () => {
                   isNewMessage={message.id === lastGeneratedMessageId}
                 />
               ))}
+              {sendingMessage && (
+                <div className="flex items-start gap-4">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-zinc-600">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  </div>
+                  <div className="text-gray-400 italic">
+                    Enviando mensagem...
+                  </div>
+                </div>
+              )}
               {loading && (
                 <div className="flex items-start gap-4">
                   <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0">
@@ -307,7 +324,7 @@ const Index = () => {
       {/* Chat Input */}
       <div className="sticky bottom-0 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 bg-zinc-700">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <ChatInput onSendMessage={handleSendMessage} onSendAudio={handleSendAudio} isLoading={loading} />
+          <ChatInput onSendMessage={handleSendMessage} onSendAudio={handleSendAudio} isLoading={loading || sendingMessage} />
         </div>
       </div>
     </div>
