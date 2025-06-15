@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSupabaseConversations } from "@/hooks/useSupabaseConversations";
@@ -9,19 +8,18 @@ import UserProfile from "../components/UserProfile";
 import { toast } from "sonner";
 import { useSidebar } from "../hooks/useSidebar";
 
-interface Message {
+interface LocalMessage {
   id: string;
   content: string;
   role: "user" | "assistant";
   timestamp: Date;
-  isTyping?: boolean;
 }
 
 const Index = () => {
   const { user } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isAiTyping, setIsAiTyping] = useState(false);
-  const [sendingMessage, setSendingMessage] = useState(false);
+  const [localMessages, setLocalMessages] = useState<LocalMessage[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [lastGeneratedMessageId, setLastGeneratedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sidebar = useSidebar();
   
@@ -33,24 +31,16 @@ const Index = () => {
     deleteConversation,
     saveMessage,
     updateConversationTitle,
-    setCurrentConversationId,
-    loadConversations
+    setCurrentConversationId
   } = useSupabaseConversations();
 
-  // Load messages from Supabase when conversation changes
-  useEffect(() => {
-    if (currentConversationId && supabaseMessages.length > 0) {
-      const loadedMessages = supabaseMessages.map(msg => ({
-        id: msg.id,
-        content: msg.content,
-        role: msg.role as "user" | "assistant",
-        timestamp: new Date(msg.created_at)
-      }));
-      setMessages(loadedMessages);
-    } else if (!currentConversationId) {
-      setMessages([]);
-    }
-  }, [currentConversationId, supabaseMessages]);
+  // Combine local messages with supabase messages for display
+  const allMessages = [...supabaseMessages.map(msg => ({
+    id: msg.id,
+    content: msg.content,
+    role: msg.role as "user" | "assistant",
+    timestamp: new Date(msg.created_at)
+  })), ...localMessages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -58,18 +48,19 @@ const Index = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [allMessages]);
 
   const handleNewChat = () => {
     setCurrentConversationId(null);
-    setMessages([]);
-    setIsAiTyping(false);
+    setLocalMessages([]);
+    setLastGeneratedMessageId(null);
     sidebar.close();
   };
 
   const handleSelectConversation = (id: string) => {
     setCurrentConversationId(id);
-    setIsAiTyping(false);
+    setLocalMessages([]);
+    setLastGeneratedMessageId(null);
     sidebar.close();
   };
 
@@ -90,52 +81,34 @@ const Index = () => {
   const handleSendMessage = async (content: string) => {
     if (!content.trim() || !user) return;
 
-    setSendingMessage(true);
-    
-    // 1. Add user message immediately to UI
-    const userMessage: Message = {
+    // Create or get conversation
+    let convId = currentConversationId;
+    if (!convId) {
+      convId = await createNewConversation(content);
+      if (!convId) return;
+    }
+
+    // Add user message to local state immediately
+    const userMessage: LocalMessage = {
       id: `user-${Date.now()}`,
       content,
       role: "user",
       timestamp: new Date()
     };
-    setMessages(prev => [...prev, userMessage]);
+    setLocalMessages(prev => [...prev, userMessage]);
+    setLoading(true);
 
     try {
-      // 2. Create or get conversation
-      let convId = currentConversationId;
-      if (!convId) {
-        convId = await createNewConversation(content);
-        if (!convId) {
-          setSendingMessage(false);
-          return;
-        }
-      }
+      // Save user message to database
+      await saveMessage(convId, content, 'user');
 
-      // 3. Save user message to database in background
-      saveMessage(convId, content, 'user');
-
-      // 4. Update conversation title if this is the first message
-      if (messages.length === 0) {
+      // Update conversation title if this is the first message
+      if (supabaseMessages.length === 0 && localMessages.length === 0) {
         const title = content.split(' ').slice(0, 3).join(' ') + '...';
-        updateConversationTitle(convId, title);
+        await updateConversationTitle(convId, title);
       }
 
-      setSendingMessage(false);
-      setIsAiTyping(true);
-
-      // 5. Add empty AI message and start typing animation
-      const aiMessageId = `ai-${Date.now() + 1}`;
-      const aiMessage: Message = {
-        id: aiMessageId,
-        content: "",
-        role: "assistant",
-        timestamp: new Date(Date.now() + 1),
-        isTyping: true
-      };
-      setMessages(prev => [...prev, aiMessage]);
-
-      // 6. Send message to API
+      // Send message to API with user_id
       const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -160,23 +133,25 @@ const Index = () => {
         assistantContent = responseText || "Unknown response format.";
       }
 
-      // 7. Update AI message with content and trigger typing animation
-      setMessages(prev => prev.map(msg => 
-        msg.id === aiMessageId 
-          ? { ...msg, content: assistantContent, isTyping: false }
-          : msg
-      ));
+      // Add assistant message to local state
+      const assistantMessageId = `assistant-${Date.now()}`;
+      const assistantMessage: LocalMessage = {
+        id: assistantMessageId,
+        content: assistantContent,
+        role: "assistant",
+        timestamp: new Date()
+      };
+      
+      setLocalMessages(prev => [...prev, assistantMessage]);
+      setLastGeneratedMessageId(assistantMessageId);
 
-      setIsAiTyping(false);
-
-      // 8. Save assistant message to database in background
-      saveMessage(convId, assistantContent, 'assistant');
-
+      // Save assistant message to database
+      await saveMessage(convId, assistantContent, 'assistant');
     } catch (error) {
       console.error("Error sending message:", error);
       toast.error("Failed to send message. Please try again.");
-      setSendingMessage(false);
-      setIsAiTyping(false);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -184,46 +159,28 @@ const Index = () => {
     if (!user) return;
     console.log("Sending audio:", audioBlob);
 
-    setSendingMessage(true);
+    // Create or get conversation
+    let convId = currentConversationId;
+    if (!convId) {
+      convId = await createNewConversation("🎵 Áudio enviado");
+      if (!convId) return;
+    }
 
-    // 1. Add user message immediately to UI
-    const userMessage: Message = {
+    // Add user message indicating audio was sent
+    const userMessage: LocalMessage = {
       id: `user-${Date.now()}`,
       content: "🎵 Áudio enviado",
       role: "user",
       timestamp: new Date()
     };
-    setMessages(prev => [...prev, userMessage]);
+    setLocalMessages(prev => [...prev, userMessage]);
+    setLoading(true);
 
     try {
-      // 2. Create or get conversation
-      let convId = currentConversationId;
-      if (!convId) {
-        convId = await createNewConversation("🎵 Áudio enviado");
-        if (!convId) {
-          setSendingMessage(false);
-          return;
-        }
-      }
+      // Save user message to database
+      await saveMessage(convId, "🎵 Áudio enviado", 'user');
 
-      // 3. Save user message to database in background
-      saveMessage(convId, "🎵 Áudio enviado", 'user');
-
-      setSendingMessage(false);
-      setIsAiTyping(true);
-
-      // 4. Add empty AI message
-      const aiMessageId = `ai-${Date.now() + 1}`;
-      const aiMessage: Message = {
-        id: aiMessageId,
-        content: "",
-        role: "assistant",
-        timestamp: new Date(Date.now() + 1),
-        isTyping: true
-      };
-      setMessages(prev => [...prev, aiMessage]);
-
-      // 5. Convert blob to base64 and send
+      // Convert blob to base64
       const reader = new FileReader();
       reader.onload = async () => {
         const base64Audio = reader.result as string;
@@ -252,24 +209,26 @@ const Index = () => {
           assistantContent = responseText || "Áudio recebido e processado.";
         }
 
-        // 6. Update AI message with content
-        setMessages(prev => prev.map(msg => 
-          msg.id === aiMessageId 
-            ? { ...msg, content: assistantContent, isTyping: false }
-            : msg
-        ));
+        const assistantMessageId = `assistant-${Date.now()}`;
+        const assistantMessage: LocalMessage = {
+          id: assistantMessageId,
+          content: assistantContent,
+          role: "assistant",
+          timestamp: new Date()
+        };
+        
+        setLocalMessages(prev => [...prev, assistantMessage]);
+        setLastGeneratedMessageId(assistantMessageId);
 
-        setIsAiTyping(false);
-
-        // 7. Save assistant message to database in background
-        saveMessage(convId!, assistantContent, 'assistant');
+        // Save assistant message to database
+        await saveMessage(convId!, assistantContent, 'assistant');
       };
       reader.readAsDataURL(audioBlob);
     } catch (error) {
       console.error("Error sending audio:", error);
       toast.error("Falha ao enviar áudio. Tente novamente.");
-      setSendingMessage(false);
-      setIsAiTyping(false);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -304,7 +263,7 @@ const Index = () => {
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto bg-zinc-900">
         <div className="max-w-4xl mx-auto px-4">
-          {messages.length === 0 && !sendingMessage ? (
+          {allMessages.length === 0 ? (
             <div className="flex items-center justify-center min-h-[60vh]">
               <div className="text-center max-w-xl mx-auto space-y-6 px-4">
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-600/10 border border-blue-200/20 dark:border-purple-500/20 bg-zinc-800">
@@ -316,26 +275,14 @@ const Index = () => {
             </div>
           ) : (
             <div className="py-6 space-y-6">
-              {messages
-                .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-                .map(message => (
-                  <ChatMessage 
-                    key={message.id} 
-                    message={message} 
-                    isNewMessage={message.isTyping || (message.role === "assistant" && message.content && !message.isTyping)}
-                  />
-                ))}
-              {sendingMessage && (
-                <div className="flex items-start gap-4">
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-zinc-600">
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  </div>
-                  <div className="text-gray-400 italic">
-                    Enviando mensagem...
-                  </div>
-                </div>
-              )}
-              {isAiTyping && (
+              {allMessages.map(message => (
+                <ChatMessage 
+                  key={message.id} 
+                  message={message} 
+                  isNewMessage={message.id === lastGeneratedMessageId}
+                />
+              ))}
+              {loading && (
                 <div className="flex items-start gap-4">
                   <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0">
                     <img 
@@ -360,7 +307,7 @@ const Index = () => {
       {/* Chat Input */}
       <div className="sticky bottom-0 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 bg-zinc-700">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <ChatInput onSendMessage={handleSendMessage} onSendAudio={handleSendAudio} isLoading={isAiTyping || sendingMessage} />
+          <ChatInput onSendMessage={handleSendMessage} onSendAudio={handleSendAudio} isLoading={loading} />
         </div>
       </div>
     </div>
