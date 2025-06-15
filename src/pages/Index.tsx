@@ -310,12 +310,10 @@ const Index = () => {
       <div className="flex-1 overflow-y-auto bg-zinc-900">
         <div className="max-w-4xl mx-auto px-4 flex flex-col h-full">
           {messages.length === 0 ? (
-            <div className="flex-1 flex flex-col justify-end">
-              <div className="text-center mb-6">
-                <span className="text-lg text-slate-200 font-medium">
-                  Bem-vindo ao Agente Anti-Fraude!
-                </span>
-              </div>
+            <div className="flex flex-1 items-center justify-center">
+              <span className="text-xl text-slate-200 font-medium">
+                Bem-vindo ao Agente Anti-Fraude!
+              </span>
             </div>
           ) : (
             <div className="py-6 space-y-6">
