@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { UserRound } from "lucide-react";
@@ -79,7 +78,7 @@ const ChatMessage = ({
   return (
     <div className={cn("group relative", isUser ? "ml-auto max-w-[80%]" : "mr-auto max-w-full")}>
       <div className={cn("flex gap-4", isUser ? "justify-end" : "justify-start")}>
-        {/* Avatar sempre visível do lado da IA, junto com thinking/texto */}
+        {/* Avatar SIEMPRE visível do lado da IA */}
         {!isUser && (
           <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0">
             <img
@@ -92,38 +91,36 @@ const ChatMessage = ({
         )}
 
         <div className="max-w-full break-words">
-          {/* Se for usuário, conteúdo puro */}
+          {/* Usuário: mensagem pura */}
           {isUser ? (
             <p className="whitespace-pre-wrap leading-relaxed text-white">{displayedContent}</p>
           ) : (
             <div className="markdown-content text-white">
-              {/* thinking Dots */}
-              {isThinking
-                ? (
-                  <div className="flex items-center space-x-1">
-                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
-                  </div>
-                )
-                : (
-                  <ReactMarkdown components={{
-                    p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-white">{children}</p>,
-                    h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-white">{children}</h1>,
-                    h2: ({ children }) => <h2 className="text-lg font-bold mb-2 text-white">{children}</h2>,
-                    h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-white">{children}</h3>,
-                    strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
-                    em: ({ children }) => <em className="italic text-white">{children}</em>,
-                    ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4 text-white">{children}</ol>,
-                    ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4 text-white">{children}</ul>,
-                    li: ({ children }) => <li className="leading-relaxed text-white">{children}</li>,
-                    code: ({ children }) => <code className="bg-gray-700 px-1 py-0.5 rounded text-sm font-mono text-white">{children}</code>,
-                    pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3 text-white">{children}</pre>,
-                    blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic mb-3 text-white">{children}</blockquote>
-                  }}>
-                    {displayedContent}
-                  </ReactMarkdown>
-                )}
+              {/* Always show thinking dots WHEN isThinking */}
+              {isThinking ? (
+                <div className="flex items-center space-x-1">
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }} />
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
+                </div>
+              ) : (
+                <ReactMarkdown components={{
+                  p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-white">{children}</p>,
+                  h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-white">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-lg font-bold mb-2 text-white">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-white">{children}</h3>,
+                  strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
+                  em: ({ children }) => <em className="italic text-white">{children}</em>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4 text-white">{children}</ol>,
+                  ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4 text-white">{children}</ul>,
+                  li: ({ children }) => <li className="leading-relaxed text-white">{children}</li>,
+                  code: ({ children }) => <code className="bg-gray-700 px-1 py-0.5 rounded text-sm font-mono text-white">{children}</code>,
+                  pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3 text-white">{children}</pre>,
+                  blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic mb-3 text-white">{children}</blockquote>
+                }}>
+                  {displayedContent}
+                </ReactMarkdown>
+              )}
             </div>
           )}
         </div>
