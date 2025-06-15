@@ -60,8 +60,13 @@ const Sidebar = ({
 
   return <>
     {/* Toggle Button */}
-    <Button variant="ghost" size="icon" onClick={onToggle} className="fixed top-4 left-4 z-50 text-white py-0 my-0 font-normal bg-zinc-700 hover:bg-zinc-600">
-      <ChevronRight className={cn("h-4 w-4 transition-transform", isOpen && "rotate-180")} />
+    <Button 
+      variant="ghost" 
+      size="sm" 
+      onClick={onToggle} 
+      className="fixed top-3 left-4 z-50 text-white p-2 bg-zinc-700 hover:bg-zinc-600 flex items-center justify-center"
+    >
+      <ChevronRight className={cn("h-5 w-5 transition-transform", isOpen && "rotate-180")} />
     </Button>
 
     {/* Sidebar */}
