@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSupabaseConversations } from "@/hooks/useSupabaseConversations";
@@ -67,6 +66,16 @@ const Index = () => {
 
   const handleDeleteConversation = (id: string) => {
     deleteConversation(id);
+  };
+
+  const handleRenameConversation = async (id: string, newTitle: string) => {
+    try {
+      await updateConversationTitle(id, newTitle);
+      toast.success("Nome da conversa alterado com sucesso");
+    } catch (error) {
+      console.error("Error renaming conversation:", error);
+      toast.error("Erro ao alterar nome da conversa");
+    }
   };
 
   const handleSendMessage = async (content: string) => {
@@ -234,6 +243,7 @@ const Index = () => {
         onNewChat={handleNewChat} 
         onSelectConversation={handleSelectConversation} 
         onDeleteConversation={handleDeleteConversation} 
+        onRenameConversation={handleRenameConversation}
       />
 
       {/* Header */}
