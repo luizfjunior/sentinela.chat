@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { UserRound } from "lucide-react";
@@ -42,11 +43,11 @@ const ChatMessage = ({
     setDisplayedContent("");
     setCurrentIndex(0);
 
-    // Show thinking dots for 200ms (reduzido de 800ms)
+    // Show thinking dots for 200ms
     const thinkingTimer = setTimeout(() => {
       setIsThinking(false);
       setIsTyping(true);
-    }, 200); // ALTERADO de 800 para 200ms
+    }, 200);
     return () => clearTimeout(thinkingTimer);
   }, [message, isUser, processedContent, isNewMessage]);
 
@@ -67,19 +68,14 @@ const ChatMessage = ({
     }
   }, [currentIndex, isTyping, isUser, processedContent, isNewMessage]);
 
-  const renderThinkingDots = () => (
-    <div className="flex items-center space-x-1">
-      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
-      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
-      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
-    </div>
-  );
+  // Condition for showing AI icon: show when there's actual content to display
+  const shouldShowAIIcon = !isUser && (!isNewMessage || isThinking || isTyping || displayedContent.length > 0);
 
   return (
     <div className={cn("group relative", isUser ? "ml-auto max-w-[80%]" : "mr-auto max-w-full")}>
       <div className={cn("flex gap-4", isUser ? "justify-end" : "justify-start")}>
-        {/* Avatar SIEMPRE visível do lado da IA */}
-        {!isUser && (
+        {/* Avatar da IA - só aparece quando há conteúdo para mostrar */}
+        {shouldShowAIIcon && (
           <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0">
             <img
               src="/lovable-uploads/iconeIA.jpg"
