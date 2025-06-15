@@ -7,6 +7,7 @@ import Sidebar from "../components/Sidebar";
 import UserProfile from "../components/UserProfile";
 import { toast } from "sonner";
 import { useSidebar } from "../hooks/useSidebar";
+
 interface Message {
   id: string;
   content: string;
@@ -14,15 +15,15 @@ interface Message {
   timestamp: Date;
   isPending?: boolean; // for messages not yet saved to Supabase
 }
+
 const Index = () => {
-  const {
-    user
-  } = useAuth();
+  const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastGeneratedMessageId, setLastGeneratedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sidebar = useSidebar();
+
   const {
     conversations,
     currentConversationId,
@@ -39,39 +40,45 @@ const Index = () => {
   useEffect(() => {
     if (currentConversationId && supabaseMessages.length > 0) {
       // Convert supabaseMessages to local Message shape
-      setMessages(supabaseMessages.map(msg => ({
-        id: msg.id,
-        content: msg.content,
-        role: msg.role as "user" | "assistant",
-        timestamp: new Date(msg.created_at)
-      })));
+      setMessages(
+        supabaseMessages.map(msg => ({
+          id: msg.id,
+          content: msg.content,
+          role: msg.role as "user" | "assistant",
+          timestamp: new Date(msg.created_at)
+        }))
+      );
     } else if (!currentConversationId) {
       setMessages([]);
     }
   }, [currentConversationId, supabaseMessages]);
+
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: "smooth"
-    });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
   useEffect(() => {
     scrollToBottom();
   }, [messages, loading]);
+
   const handleNewChat = () => {
     setCurrentConversationId(null);
     setMessages([]);
     setLastGeneratedMessageId(null);
     sidebar.close();
   };
+
   const handleSelectConversation = (id: string) => {
     setCurrentConversationId(id);
     setMessages([]);
     setLastGeneratedMessageId(null);
     sidebar.close();
   };
+
   const handleDeleteConversation = (id: string) => {
     deleteConversation(id);
   };
+
   const handleRenameConversation = async (id: string, newTitle: string) => {
     try {
       await updateConversationTitle(id, newTitle);
@@ -91,12 +98,25 @@ const Index = () => {
   useEffect(() => {
     // If supabaseMessages were loaded, remove pending ones (by id match/role)
     if (currentConversationId && supabaseMessages.length > 0) {
-      setMessages(prev => prev.filter(m => !m.isPending || !(supabaseMessages.findIndex(supMsg => supMsg.content === m.content && supMsg.role === m.role && Math.abs(new Date(supMsg.created_at).getTime() - m.timestamp.getTime()) < 5000 // within 5s
-      ) !== -1)));
+      setMessages(prev =>
+        prev.filter(
+          m =>
+            !m.isPending ||
+            !(
+              supabaseMessages.findIndex(supMsg =>
+                supMsg.content === m.content &&
+                supMsg.role === m.role &&
+                Math.abs(new Date(supMsg.created_at).getTime() - m.timestamp.getTime()) < 5000 // within 5s
+              ) !== -1
+            )
+        )
+      );
     }
   }, [supabaseMessages, currentConversationId]);
+
   const handleSendMessage = async (content: string) => {
     if (!content.trim() || !user) return;
+
     setLoading(true);
 
     // Create or get conversation
@@ -135,15 +155,14 @@ const Index = () => {
     try {
       const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
           message: content,
           user_id: user.id
         })
       });
       const responseText = await response.text();
+
       try {
         if (responseText && responseText.trim()) {
           const data = JSON.parse(responseText);
@@ -175,10 +194,13 @@ const Index = () => {
     saveMessage(convId, assistantContent, 'assistant').then(() => {
       // Will be cleaned by useEffect when supabaseMessages load
     });
+
     setLoading(false);
   };
+
   const handleSendAudio = async (audioBlob: Blob) => {
     if (!user) return;
+
     setLoading(true);
 
     // Create or get conversation
@@ -190,6 +212,7 @@ const Index = () => {
         return;
       }
     }
+
     const textMessage = "🎵 Áudio enviado";
 
     // User message
@@ -201,19 +224,20 @@ const Index = () => {
       isPending: true
     };
     appendMessage(userMessage);
-    saveMessage(convId, textMessage, 'user').then(() => {});
+
+    saveMessage(convId, textMessage, 'user').then(() => { });
+
     try {
       // Convert blob to base64 for API
       const reader = new FileReader();
       reader.onload = async () => {
         const base64Audio = reader.result as string;
         let assistantContent = "";
+
         try {
           const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               audioData: base64Audio,
               messageType: "audio",
@@ -234,6 +258,7 @@ const Index = () => {
         } catch (err) {
           assistantContent = "Erro ao processar o áudio.";
         }
+
         const assistantMessageId = `assistant-${Date.now()}`;
         const assistantMessage: Message = {
           id: assistantMessageId,
@@ -244,7 +269,8 @@ const Index = () => {
         };
         appendMessage(assistantMessage);
         setLastGeneratedMessageId(assistantMessageId);
-        saveMessage(convId!, assistantContent, 'assistant').then(() => {});
+
+        saveMessage(convId!, assistantContent, 'assistant').then(() => { });
       };
       reader.readAsDataURL(audioBlob);
     } catch (error) {
@@ -253,14 +279,29 @@ const Index = () => {
       setLoading(false);
     }
   };
-  return <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#0f1218] text-gray-900 dark:text-white">
+
+  return (
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#0f1218] text-gray-900 dark:text-white">
       {/* Sidebar */}
-      <Sidebar isOpen={sidebar.isOpen} onToggle={sidebar.toggle} conversations={conversations} currentConversationId={currentConversationId} onNewChat={handleNewChat} onSelectConversation={handleSelectConversation} onDeleteConversation={handleDeleteConversation} onRenameConversation={handleRenameConversation} />
+      <Sidebar 
+        isOpen={sidebar.isOpen}
+        onToggle={sidebar.toggle}
+        conversations={conversations}
+        currentConversationId={currentConversationId}
+        onNewChat={handleNewChat}
+        onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
+        onRenameConversation={handleRenameConversation}
+      />
       {/* Header */}
       <header className="sticky top-0 z-10 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 bg-zinc-700">
         <div className="max-w-4xl mx-auto flex items-center justify-between px-0 py-[13px]">
           <div className="flex items-center gap-3 ml-12">
-            <img alt="Grupo Oscar Logo" src="/lovable-uploads/8d123358-879a-4bd0-8c59-94020f57ed0c.jpg" className="mix-blend-screen w-24 h-auto mx-auto object-fill" />
+            <img 
+              alt="Grupo Oscar Logo" 
+              src="/lovable-uploads/8d123358-879a-4bd0-8c59-94020f57ed0c.jpg" 
+              className="mix-blend-screen w-24 h-auto mx-auto object-fill" 
+            />
           </div>
           <UserProfile />
         </div>
@@ -268,25 +309,41 @@ const Index = () => {
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto bg-zinc-900">
         <div className="max-w-4xl mx-auto px-4 flex flex-col h-full">
-          {messages.length === 0 ? <div className="flex-1 flex flex-col justify-end">
-              <div className="text-center mb-6 py-0 px-0 my-[240px]">
-                <span className="text-slate-200 text-xl font-semibold text-center py-0">
+          {messages.length === 0 ? (
+            <div className="flex-1 flex flex-col justify-end">
+              <div className="text-center mb-6">
+                <span className="text-lg text-slate-200 font-medium">
                   Bem-vindo ao Agente Anti-Fraude!
                 </span>
               </div>
-            </div> : <div className="py-6 space-y-6">
-              {messages.map(message => <ChatMessage key={message.id} message={message} isNewMessage={message.id === lastGeneratedMessageId && message.role === "assistant"} />)}
-              {loading && <div className="flex items-start gap-4">
+            </div>
+          ) : (
+            <div className="py-6 space-y-6">
+              {messages.map(message => (
+                <ChatMessage 
+                  key={message.id} 
+                  message={message} 
+                  isNewMessage={message.id === lastGeneratedMessageId && message.role === "assistant"}
+                />
+              ))}
+              {loading && (
+                <div className="flex items-start gap-4">
                   <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0">
-                    <img src="/lovable-uploads/iconeIA.jpg" alt="IA" className="w-full h-full object-cover" />
+                    <img 
+                      src="/lovable-uploads/iconeIA.jpg" 
+                      alt="IA" 
+                      className="w-full h-full object-cover"
+                    />
                   </div>
                   <div className="typing-indicator mt-1">
                     <span></span>
                     <span></span>
                     <span></span>
                   </div>
-                </div>}
-            </div>}
+                </div>
+              )}
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -296,6 +353,8 @@ const Index = () => {
           <ChatInput onSendMessage={handleSendMessage} onSendAudio={handleSendAudio} isLoading={loading} />
         </div>
       </div>
-    </div>;
+    </div>
+  );
 };
+
 export default Index;
