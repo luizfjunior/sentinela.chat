@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSupabaseConversations } from "@/hooks/useSupabaseConversations";
@@ -8,21 +9,22 @@ import UserProfile from "../components/UserProfile";
 import { toast } from "sonner";
 import { useSidebar } from "../hooks/useSidebar";
 
-interface LocalMessage {
+interface Message {
   id: string;
   content: string;
   role: "user" | "assistant";
   timestamp: Date;
+  isPending?: boolean; // for messages not yet saved to Supabase
 }
 
 const Index = () => {
   const { user } = useAuth();
-  const [localMessages, setLocalMessages] = useState<LocalMessage[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastGeneratedMessageId, setLastGeneratedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sidebar = useSidebar();
-  
+
   const {
     conversations,
     currentConversationId,
@@ -31,16 +33,26 @@ const Index = () => {
     deleteConversation,
     saveMessage,
     updateConversationTitle,
-    setCurrentConversationId
+    setCurrentConversationId,
+    loadConversations
   } = useSupabaseConversations();
 
-  // Combine local messages with supabase messages for display
-  const allMessages = [...supabaseMessages.map(msg => ({
-    id: msg.id,
-    content: msg.content,
-    role: msg.role as "user" | "assistant",
-    timestamp: new Date(msg.created_at)
-  })), ...localMessages].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  // Load messages from Supabase only when conversation changes
+  useEffect(() => {
+    if (currentConversationId && supabaseMessages.length > 0) {
+      // Convert supabaseMessages to local Message shape
+      setMessages(
+        supabaseMessages.map(msg => ({
+          id: msg.id,
+          content: msg.content,
+          role: msg.role as "user" | "assistant",
+          timestamp: new Date(msg.created_at)
+        }))
+      );
+    } else if (!currentConversationId) {
+      setMessages([]);
+    }
+  }, [currentConversationId, supabaseMessages]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -48,18 +60,18 @@ const Index = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [allMessages]);
+  }, [messages, loading]);
 
   const handleNewChat = () => {
     setCurrentConversationId(null);
-    setLocalMessages([]);
+    setMessages([]);
     setLastGeneratedMessageId(null);
     sidebar.close();
   };
 
   const handleSelectConversation = (id: string) => {
     setCurrentConversationId(id);
-    setLocalMessages([]);
+    setMessages([]);
     setLastGeneratedMessageId(null);
     sidebar.close();
   };
@@ -78,37 +90,70 @@ const Index = () => {
     }
   };
 
+  // Helper: add message to local messages state (at end)
+  const appendMessage = (msg: Message) => {
+    setMessages(prev => [...prev, msg]);
+  };
+
+  // Remove pending (unsaved) user/assistant messages after saved and reloaded from Supabase
+  useEffect(() => {
+    // If supabaseMessages were loaded, remove pending ones (by id match/role)
+    if (currentConversationId && supabaseMessages.length > 0) {
+      setMessages(prev =>
+        prev.filter(
+          m =>
+            !m.isPending ||
+            !(
+              supabaseMessages.findIndex(supMsg =>
+                supMsg.content === m.content &&
+                supMsg.role === m.role &&
+                Math.abs(new Date(supMsg.created_at).getTime() - m.timestamp.getTime()) < 5000 // within 5s
+              ) !== -1
+            )
+        )
+      );
+    }
+  }, [supabaseMessages, currentConversationId]);
+
   const handleSendMessage = async (content: string) => {
     if (!content.trim() || !user) return;
+
+    setLoading(true);
 
     // Create or get conversation
     let convId = currentConversationId;
     if (!convId) {
       convId = await createNewConversation(content);
-      if (!convId) return;
+      if (!convId) {
+        setLoading(false);
+        return;
+      }
     }
 
-    // Add user message to local state immediately
-    const userMessage: LocalMessage = {
+    // 1. Add user message immediately (pending)
+    const userMessage: Message = {
       id: `user-${Date.now()}`,
       content,
       role: "user",
-      timestamp: new Date()
+      timestamp: new Date(),
+      isPending: true
     };
-    setLocalMessages(prev => [...prev, userMessage]);
-    setLoading(true);
+    appendMessage(userMessage);
 
+    // 2. Save user message to Supabase (fire and forget)
+    saveMessage(convId, content, 'user').then(() => {
+      // Will be cleaned by useEffect when supabaseMessages load
+    });
+
+    // 3. If first message, update conversation title
+    if (supabaseMessages.length === 0 && messages.length === 0) {
+      const title = content.split(' ').slice(0, 3).join(' ') + '...';
+      updateConversationTitle(convId, title);
+    }
+
+    // 4. Call backend for AI response
+    let assistantContent = "";
     try {
-      // Save user message to database
-      await saveMessage(convId, content, 'user');
-
-      // Update conversation title if this is the first message
-      if (supabaseMessages.length === 0 && localMessages.length === 0) {
-        const title = content.split(' ').slice(0, 3).join(' ') + '...';
-        await updateConversationTitle(convId, title);
-      }
-
-      // Send message to API with user_id
       const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -117,9 +162,7 @@ const Index = () => {
           user_id: user.id
         })
       });
-
       const responseText = await response.text();
-      let assistantContent = "";
 
       try {
         if (responseText && responseText.trim()) {
@@ -129,103 +172,109 @@ const Index = () => {
           assistantContent = "Empty response from server.";
         }
       } catch (parseError) {
-        console.log("Response is not JSON, using as plain text:", responseText);
         assistantContent = responseText || "Unknown response format.";
       }
-
-      // Add assistant message to local state
-      const assistantMessageId = `assistant-${Date.now()}`;
-      const assistantMessage: LocalMessage = {
-        id: assistantMessageId,
-        content: assistantContent,
-        role: "assistant",
-        timestamp: new Date()
-      };
-      
-      setLocalMessages(prev => [...prev, assistantMessage]);
-      setLastGeneratedMessageId(assistantMessageId);
-
-      // Save assistant message to database
-      await saveMessage(convId, assistantContent, 'assistant');
-    } catch (error) {
-      console.error("Error sending message:", error);
-      toast.error("Failed to send message. Please try again.");
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      assistantContent = "Erro ao obter resposta da IA.";
+      toast.error("Erro ao buscar resposta da IA");
     }
+
+    // 5. Add AI message with pending/animation
+    const assistantMessageId = `assistant-${Date.now()}`;
+    const assistantMessage: Message = {
+      id: assistantMessageId,
+      content: assistantContent,
+      role: "assistant",
+      timestamp: new Date(),
+      isPending: true
+    };
+    appendMessage(assistantMessage);
+    setLastGeneratedMessageId(assistantMessageId);
+
+    // 6. Save assistant message to Supabase
+    saveMessage(convId, assistantContent, 'assistant').then(() => {
+      // Will be cleaned by useEffect when supabaseMessages load
+    });
+
+    setLoading(false);
   };
 
   const handleSendAudio = async (audioBlob: Blob) => {
     if (!user) return;
-    console.log("Sending audio:", audioBlob);
+
+    setLoading(true);
 
     // Create or get conversation
     let convId = currentConversationId;
     if (!convId) {
       convId = await createNewConversation("🎵 Áudio enviado");
-      if (!convId) return;
+      if (!convId) {
+        setLoading(false);
+        return;
+      }
     }
 
-    // Add user message indicating audio was sent
-    const userMessage: LocalMessage = {
+    const textMessage = "🎵 Áudio enviado";
+
+    // User message
+    const userMessage: Message = {
       id: `user-${Date.now()}`,
-      content: "🎵 Áudio enviado",
+      content: textMessage,
       role: "user",
-      timestamp: new Date()
+      timestamp: new Date(),
+      isPending: true
     };
-    setLocalMessages(prev => [...prev, userMessage]);
-    setLoading(true);
+    appendMessage(userMessage);
+
+    saveMessage(convId, textMessage, 'user').then(() => { });
 
     try {
-      // Save user message to database
-      await saveMessage(convId, "🎵 Áudio enviado", 'user');
-
-      // Convert blob to base64
+      // Convert blob to base64 for API
       const reader = new FileReader();
       reader.onload = async () => {
         const base64Audio = reader.result as string;
-        const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            audioData: base64Audio,
-            messageType: "audio",
-            user_id: user.id
-          })
-        });
-
-        const responseText = await response.text();
         let assistantContent = "";
 
         try {
-          if (responseText && responseText.trim()) {
-            const data = JSON.parse(responseText);
-            assistantContent = data.output || responseText;
-          } else {
-            assistantContent = "Áudio processado com sucesso.";
+          const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              audioData: base64Audio,
+              messageType: "audio",
+              user_id: user.id
+            })
+          });
+          const responseText = await response.text();
+          try {
+            if (responseText && responseText.trim()) {
+              const data = JSON.parse(responseText);
+              assistantContent = data.output || responseText;
+            } else {
+              assistantContent = "Áudio processado com sucesso.";
+            }
+          } catch {
+            assistantContent = responseText || "Áudio recebido e processado.";
           }
-        } catch (parseError) {
-          console.log("Response is not JSON, using as plain text:", responseText);
-          assistantContent = responseText || "Áudio recebido e processado.";
+        } catch (err) {
+          assistantContent = "Erro ao processar o áudio.";
         }
 
         const assistantMessageId = `assistant-${Date.now()}`;
-        const assistantMessage: LocalMessage = {
+        const assistantMessage: Message = {
           id: assistantMessageId,
           content: assistantContent,
           role: "assistant",
-          timestamp: new Date()
+          timestamp: new Date(),
+          isPending: true
         };
-        
-        setLocalMessages(prev => [...prev, assistantMessage]);
+        appendMessage(assistantMessage);
         setLastGeneratedMessageId(assistantMessageId);
 
-        // Save assistant message to database
-        await saveMessage(convId!, assistantContent, 'assistant');
+        saveMessage(convId!, assistantContent, 'assistant').then(() => { });
       };
       reader.readAsDataURL(audioBlob);
     } catch (error) {
-      console.error("Error sending audio:", error);
       toast.error("Falha ao enviar áudio. Tente novamente.");
     } finally {
       setLoading(false);
@@ -236,16 +285,15 @@ const Index = () => {
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#0f1218] text-gray-900 dark:text-white">
       {/* Sidebar */}
       <Sidebar 
-        isOpen={sidebar.isOpen} 
-        onToggle={sidebar.toggle} 
-        conversations={conversations} 
-        currentConversationId={currentConversationId} 
-        onNewChat={handleNewChat} 
-        onSelectConversation={handleSelectConversation} 
-        onDeleteConversation={handleDeleteConversation} 
+        isOpen={sidebar.isOpen}
+        onToggle={sidebar.toggle}
+        conversations={conversations}
+        currentConversationId={currentConversationId}
+        onNewChat={handleNewChat}
+        onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
         onRenameConversation={handleRenameConversation}
       />
-
       {/* Header */}
       <header className="sticky top-0 z-10 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 bg-zinc-700">
         <div className="max-w-4xl mx-auto flex items-center justify-between px-0 py-[13px]">
@@ -259,11 +307,10 @@ const Index = () => {
           <UserProfile />
         </div>
       </header>
-
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto bg-zinc-900">
         <div className="max-w-4xl mx-auto px-4">
-          {allMessages.length === 0 ? (
+          {messages.length === 0 ? (
             <div className="flex items-center justify-center min-h-[60vh]">
               <div className="text-center max-w-xl mx-auto space-y-6 px-4">
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-600/10 border border-blue-200/20 dark:border-purple-500/20 bg-zinc-800">
@@ -275,11 +322,11 @@ const Index = () => {
             </div>
           ) : (
             <div className="py-6 space-y-6">
-              {allMessages.map(message => (
+              {messages.map(message => (
                 <ChatMessage 
                   key={message.id} 
                   message={message} 
-                  isNewMessage={message.id === lastGeneratedMessageId}
+                  isNewMessage={message.id === lastGeneratedMessageId && message.role === "assistant"}
                 />
               ))}
               {loading && (
@@ -303,7 +350,6 @@ const Index = () => {
           <div ref={messagesEndRef} />
         </div>
       </div>
-
       {/* Chat Input */}
       <div className="sticky bottom-0 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 bg-zinc-700">
         <div className="max-w-4xl mx-auto px-4 py-4">
