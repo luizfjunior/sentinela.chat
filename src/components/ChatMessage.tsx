@@ -43,11 +43,11 @@ const ChatMessage = ({
     setDisplayedContent("");
     setCurrentIndex(0);
 
-    // Show thinking dots for 800ms
+    // Show thinking dots for 200ms (reduzido de 800ms)
     const thinkingTimer = setTimeout(() => {
       setIsThinking(false);
       setIsTyping(true);
-    }, 800);
+    }, 200); // ALTERADO de 800 para 200ms
     return () => clearTimeout(thinkingTimer);
   }, [message, isUser, processedContent, isNewMessage]);
 
