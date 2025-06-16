@@ -1,4 +1,5 @@
 
+
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { UserRound } from "lucide-react";
@@ -107,8 +108,8 @@ const ChatMessage = ({
                   h3: ({ children }) => <h3 className="text-base font-bold mb-2 text-white">{children}</h3>,
                   strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
                   em: ({ children }) => <em className="italic text-white">{children}</em>,
-                  ol: ({ children }) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4 text-white">{children}</ol>,
-                  ul: ({ children }) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4 text-white">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside mb-3 ml-4 text-white">{children}</ol>,
+                  ul: ({ children }) => <ul className="list-disc list-inside mb-3 ml-4 text-white">{children}</ul>,
                   li: ({ children }) => <li className="leading-relaxed text-white">{children}</li>,
                   code: ({ children }) => <code className="bg-gray-700 px-1 py-0.5 rounded text-sm font-mono text-white">{children}</code>,
                   pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3 text-white">{children}</pre>,
@@ -133,3 +134,4 @@ const ChatMessage = ({
 };
 
 export default ChatMessage;
+
