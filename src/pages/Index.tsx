@@ -1,3 +1,4 @@
+
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSupabaseConversations } from "@/hooks/useSupabaseConversations";
@@ -150,12 +151,12 @@ const Index = () => {
       updateConversationTitle(convId, title);
     }
 
-    // 4. Call backend for AI response with 4-minute timeout
+    // 4. Call backend for AI response with 5-minute timeout
     let assistantContent = "";
     try {
-      // Create AbortController with 4-minute timeout
+      // Create AbortController with 5-minute timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 240000); // 4 minutes
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
 
       const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
         method: "POST",
@@ -182,8 +183,8 @@ const Index = () => {
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        assistantContent = "A requisição demorou mais de 4 minutos e foi cancelada. Tente novamente.";
-        toast.error("Timeout: Requisição cancelada após 4 minutos");
+        assistantContent = "A requisição demorou mais de 5 minutos e foi cancelada. Tente novamente.";
+        toast.error("Timeout: Requisição cancelada após 5 minutos");
       } else {
         assistantContent = "Erro ao obter resposta da IA.";
         toast.error("Erro ao buscar resposta da IA");
@@ -247,9 +248,9 @@ const Index = () => {
         let assistantContent = "";
 
         try {
-          // Create AbortController with 4-minute timeout for audio as well
+          // Create AbortController with 5-minute timeout for audio as well
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 240000); // 4 minutes
+          const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
 
           const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
             method: "POST",
@@ -276,8 +277,8 @@ const Index = () => {
           }
         } catch (err: any) {
           if (err.name === 'AbortError') {
-            assistantContent = "O processamento do áudio demorou mais de 4 minutos e foi cancelado. Tente novamente.";
-            toast.error("Timeout: Processamento de áudio cancelado após 4 minutos");
+            assistantContent = "O processamento do áudio demorou mais de 5 minutos e foi cancelado. Tente novamente.";
+            toast.error("Timeout: Processamento de áudio cancelado após 5 minutos");
           } else {
             assistantContent = "Erro ao processar o áudio.";
           }
