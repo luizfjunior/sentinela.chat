@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSupabaseConversations } from "@/hooks/useSupabaseConversations";
@@ -18,7 +17,7 @@ interface Message {
 }
 
 const Index = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastGeneratedMessageId, setLastGeneratedMessageId] = useState<string | null>(null);
@@ -163,7 +162,8 @@ const Index = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           message: content,
-          user_id: user.id
+          user_id: user.id,
+          full_name: profile?.full_name || "Usuário"
         }),
         signal: controller.signal
       });
@@ -258,7 +258,8 @@ const Index = () => {
             body: JSON.stringify({
               audioData: base64Audio,
               messageType: "audio",
-              user_id: user.id
+              user_id: user.id,
+              full_name: profile?.full_name || "Usuário"
             }),
             signal: controller.signal
           });
