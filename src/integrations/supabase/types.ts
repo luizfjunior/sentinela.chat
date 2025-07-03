@@ -97,18 +97,24 @@ export type Database = {
       }
       sentinela_memory_temp: {
         Row: {
+          conversation_id: string | null
           id: number
           message: Json
+          message_user_id: string | null
           session_id: string
         }
         Insert: {
+          conversation_id?: string | null
           id?: number
           message: Json
+          message_user_id?: string | null
           session_id: string
         }
         Update: {
+          conversation_id?: string | null
           id?: number
           message?: Json
+          message_user_id?: string | null
           session_id?: string
         }
         Relationships: []
