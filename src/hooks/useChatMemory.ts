@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -86,7 +85,7 @@ export const useChatMemory = () => {
       (data || []).forEach(record => {
         const chatRecord: ChatMemoryRecord = {
           ...record,
-          message: record.message as ChatMemoryData
+          message: record.message as unknown as ChatMemoryData
         };
         
         const existing = conversationMap.get(record.conversation_id);
@@ -123,7 +122,7 @@ export const useChatMemory = () => {
       }
 
       if (data) {
-        setCurrentMemory(data.message as ChatMemoryData);
+        setCurrentMemory(data.message as unknown as ChatMemoryData);
       }
     } catch (error) {
       console.error('Error loading conversation memory:', error);
