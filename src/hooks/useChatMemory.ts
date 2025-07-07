@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import type { Database } from '@/integrations/supabase/types';
 
 export interface ChatMemoryData {
   user_name: string;
@@ -33,6 +34,9 @@ export interface ChatMemoryRecord {
   created_at: string;
   message: ChatMemoryData;
 }
+
+type ChatMemoryRow = Database['public']['Tables']['chat_memory']['Row'];
+type ChatMemoryInsert = Database['public']['Tables']['chat_memory']['Insert'];
 
 export const useChatMemory = () => {
   const { user, profile } = useAuth();
@@ -80,9 +84,14 @@ export const useChatMemory = () => {
       // Group by conversation_id and get the latest record for each conversation
       const conversationMap = new Map<string, ChatMemoryRecord>();
       (data || []).forEach(record => {
+        const chatRecord: ChatMemoryRecord = {
+          ...record,
+          message: record.message as ChatMemoryData
+        };
+        
         const existing = conversationMap.get(record.conversation_id);
         if (!existing || new Date(record.created_at) > new Date(existing.created_at)) {
-          conversationMap.set(record.conversation_id, record as ChatMemoryRecord);
+          conversationMap.set(record.conversation_id, chatRecord);
         }
       });
 
@@ -105,7 +114,7 @@ export const useChatMemory = () => {
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
         console.error('Error loading conversation memory:', error);
@@ -147,14 +156,16 @@ export const useChatMemory = () => {
         messages: []
       };
 
+      const insertData: ChatMemoryInsert = {
+        user_id: user.id,
+        conversation_id: conversationId,
+        loja_id: 'loja_101',
+        message: initialMemory as any
+      };
+
       const { data, error } = await supabase
         .from('chat_memory')
-        .insert({
-          user_id: user.id,
-          conversation_id: conversationId,
-          loja_id: 'loja_101',
-          message: initialMemory
-        })
+        .insert(insertData)
         .select()
         .single();
 
@@ -192,14 +203,16 @@ export const useChatMemory = () => {
         messages: updatedMessages
       };
 
+      const insertData: ChatMemoryInsert = {
+        user_id: user.id,
+        conversation_id: conversationId,
+        loja_id: 'loja_101',
+        message: updatedMemory as any
+      };
+
       const { data, error } = await supabase
         .from('chat_memory')
-        .insert({
-          user_id: user.id,
-          conversation_id: conversationId,
-          loja_id: 'loja_101',
-          message: updatedMemory
-        })
+        .insert(insertData)
         .select()
         .single();
 
@@ -255,14 +268,16 @@ export const useChatMemory = () => {
         conversation_title: title
       };
 
+      const insertData: ChatMemoryInsert = {
+        user_id: user.id,
+        conversation_id: conversationId,
+        loja_id: 'loja_101',
+        message: updatedMemory as any
+      };
+
       const { error } = await supabase
         .from('chat_memory')
-        .insert({
-          user_id: user.id,
-          conversation_id: conversationId,
-          loja_id: 'loja_101',
-          message: updatedMemory
-        });
+        .insert(insertData);
 
       if (error) {
         console.error('Error updating conversation title:', error);
