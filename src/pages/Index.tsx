@@ -1,7 +1,6 @@
-
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useChatMemory } from "@/hooks/useChatMemory";
+import { useSupabaseConversations } from "@/hooks/useSupabaseConversations";
 import ChatMessage from "../components/ChatMessage";
 import ChatInput from "../components/ChatInput";
 import Sidebar from "../components/Sidebar";
@@ -14,7 +13,7 @@ interface Message {
   content: string;
   role: "user" | "assistant";
   timestamp: Date;
-  isPending?: boolean;
+  isPending?: boolean; // for messages not yet saved to Supabase
 }
 
 const Index = () => {
@@ -28,30 +27,31 @@ const Index = () => {
   const {
     conversations,
     currentConversationId,
-    currentMemory,
+    messages: supabaseMessages,
     createNewConversation,
     deleteConversation,
-    updateConversationMemory,
+    saveMessage,
     updateConversationTitle,
     setCurrentConversationId,
     loadConversations
-  } = useChatMemory();
+  } = useSupabaseConversations();
 
-  // Load messages from current memory when conversation changes
+  // Load messages from Supabase only when conversation changes
   useEffect(() => {
-    if (currentConversationId && currentMemory?.messages) {
+    if (currentConversationId && supabaseMessages.length > 0) {
+      // Convert supabaseMessages to local Message shape
       setMessages(
-        currentMemory.messages.map((msg, index) => ({
-          id: `${currentConversationId}-${index}`,
+        supabaseMessages.map(msg => ({
+          id: msg.id,
           content: msg.content,
           role: msg.role as "user" | "assistant",
-          timestamp: new Date(msg.timestamp)
+          timestamp: new Date(msg.created_at)
         }))
       );
     } else if (!currentConversationId) {
       setMessages([]);
     }
-  }, [currentConversationId, currentMemory]);
+  }, [currentConversationId, supabaseMessages]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -89,9 +89,30 @@ const Index = () => {
     }
   };
 
+  // Helper: add message to local messages state (at end)
   const appendMessage = (msg: Message) => {
     setMessages(prev => [...prev, msg]);
   };
+
+  // Remove pending (unsaved) user/assistant messages after saved and reloaded from Supabase
+  useEffect(() => {
+    // If supabaseMessages were loaded, remove pending ones (by id match/role)
+    if (currentConversationId && supabaseMessages.length > 0) {
+      setMessages(prev =>
+        prev.filter(
+          m =>
+            !m.isPending ||
+            !(
+              supabaseMessages.findIndex(supMsg =>
+                supMsg.content === m.content &&
+                supMsg.role === m.role &&
+                Math.abs(new Date(supMsg.created_at).getTime() - m.timestamp.getTime()) < 5000 // within 5s
+              ) !== -1
+            )
+        )
+      );
+    }
+  }, [supabaseMessages, currentConversationId]);
 
   const handleSendMessage = async (content: string) => {
     if (!content.trim() || !user) return;
@@ -118,11 +139,13 @@ const Index = () => {
     };
     appendMessage(userMessage);
 
-    // 2. Update conversation memory with user message
-    await updateConversationMemory(convId, { role: 'user', content });
+    // 2. Save user message to Supabase (fire and forget)
+    saveMessage(convId, content, 'user').then(() => {
+      // Will be cleaned by useEffect when supabaseMessages load
+    });
 
     // 3. If first message, update conversation title
-    if (!currentMemory?.messages?.length) {
+    if (supabaseMessages.length === 0 && messages.length === 0) {
       const title = content.split(' ').slice(0, 3).join(' ') + '...';
       updateConversationTitle(convId, title);
     }
@@ -130,8 +153,9 @@ const Index = () => {
     // 4. Call backend for AI response with 5-minute timeout
     let assistantContent = "";
     try {
+      // Create AbortController with 5-minute timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000);
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
 
       const response = await fetch("https://primary-production-7c6c.up.railway.app/webhook/dp01-sent04l", {
         method: "POST",
@@ -180,8 +204,10 @@ const Index = () => {
     appendMessage(assistantMessage);
     setLastGeneratedMessageId(assistantMessageId);
 
-    // 6. Update conversation memory with assistant message
-    await updateConversationMemory(convId, { role: 'assistant', content: assistantContent });
+    // 6. Save assistant message to Supabase
+    saveMessage(convId, assistantContent, 'assistant').then(() => {
+      // Will be cleaned by useEffect when supabaseMessages load
+    });
 
     setLoading(false);
   };
@@ -213,17 +239,19 @@ const Index = () => {
     };
     appendMessage(userMessage);
 
-    await updateConversationMemory(convId, { role: 'user', content: textMessage });
+    saveMessage(convId, textMessage, 'user').then(() => { });
 
     try {
+      // Convert blob to base64 for API
       const reader = new FileReader();
       reader.onload = async () => {
         const base64Audio = reader.result as string;
         let assistantContent = "";
 
         try {
+          // Create AbortController with 5-minute timeout for audio as well
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 300000);
+          const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
 
           const response = await fetch("https://primary-production-7c6c.up.railway.app/webhook/dp01-sent04l", {
             method: "POST",
@@ -270,7 +298,7 @@ const Index = () => {
         appendMessage(assistantMessage);
         setLastGeneratedMessageId(assistantMessageId);
 
-        await updateConversationMemory(convId!, { role: 'assistant', content: assistantContent });
+        saveMessage(convId!, assistantContent, 'assistant').then(() => { });
       };
       reader.readAsDataURL(audioBlob);
     } catch (error) {
@@ -280,21 +308,13 @@ const Index = () => {
     }
   };
 
-  // Convert chat memory records to format expected by Sidebar
-  const sidebarConversations = conversations.map(conv => ({
-    id: conv.conversation_id,
-    title: conv.message.conversation_title || 'Nova conversa',
-    created_at: conv.created_at,
-    updated_at: conv.created_at
-  }));
-
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#0f1218] text-gray-900 dark:text-white">
       {/* Sidebar */}
       <Sidebar 
         isOpen={sidebar.isOpen}
         onToggle={sidebar.toggle}
-        conversations={sidebarConversations}
+        conversations={conversations}
         currentConversationId={currentConversationId}
         onNewChat={handleNewChat}
         onSelectConversation={handleSelectConversation}
