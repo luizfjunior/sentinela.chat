@@ -157,7 +157,7 @@ const Index = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
 
-      const response = await fetch("https://primary-production-7c6c.up.railway.app/webhook/dp01-sent04l", {
+      const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -253,7 +253,7 @@ const Index = () => {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
 
-          const response = await fetch("https://primary-production-7c6c.up.railway.app/webhook/dp01-sent04l", {
+          const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
