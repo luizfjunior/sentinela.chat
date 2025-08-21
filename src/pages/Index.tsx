@@ -153,10 +153,7 @@ const Index = () => {
     // 4. Call backend for AI response with 5-minute timeout
     let assistantContent = "";
     try {
-      // Create AbortController with 5-minute timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
-
+      // Removed timeout to allow unlimited wait time for webhook response
       const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -165,11 +162,8 @@ const Index = () => {
           user_id: user.id,
           full_name: profile?.full_name || "Usuário",
           conversation_id: convId
-        }),
-        signal: controller.signal
+        })
       });
-
-      clearTimeout(timeoutId);
       const responseText = await response.text();
 
       try {
@@ -249,10 +243,7 @@ const Index = () => {
         let assistantContent = "";
 
         try {
-          // Create AbortController with 5-minute timeout for audio as well
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
-
+          // Removed timeout to allow unlimited wait time for webhook response
           const response = await fetch("https://pmogrupooscar.app.n8n.cloud/webhook/chat-sentinela-pd1245", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -262,11 +253,8 @@ const Index = () => {
               user_id: user.id,
               full_name: profile?.full_name || "Usuário",
               conversation_id: convId
-            }),
-            signal: controller.signal
+            })
           });
-
-          clearTimeout(timeoutId);
           const responseText = await response.text();
           try {
             if (responseText && responseText.trim()) {
