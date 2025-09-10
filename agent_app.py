@@ -2,12 +2,19 @@ import os, traceback
 from typing import Optional
 import numpy as np
 import pandas as pd
-import re
+import re, unicodedata
 import json
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import HTMLResponse
+import time
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from contextlib import asynccontextmanager
+
 from pydantic import BaseModel
+import html
+
 
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
@@ -30,6 +37,75 @@ def status():
 def ping():
     return {"ok": True}
 
+def _missing_key_banner() -> str:
+    return (
+        "\n"
+        "============================================================\n"
+        "  ❌ OPENAI_API_KEY não definida\n"
+        "  Defina a variável no terminal OU use o launcher recomendado:\n\n"
+        "    Windows PowerShell:\n"
+        '      $env:OPENAI_API_KEY = "SUA_CHAVE_AQUI"\n'
+        "      python serve.py --host 0.0.0.0 --port 8000 --reload\n\n"
+        "    Linux/macOS:\n"
+        '      export OPENAI_API_KEY=\"SUA_CHAVE_AQUI\"\n'
+        "      python serve.py --host 0.0.0.0 --port 8000 --reload\n\n"
+        "  Links após iniciar:\n"
+        "    • UI (Chat):   http://<host>:<port>/\n"
+        "    • Swagger:     http://<host>:<port>/docs\n"
+        "============================================================\n"
+    )
+
+@asynccontextmanager
+async def app_lifespan(app):
+    # STARTUP
+    if not os.environ.get("OPENAI_API_KEY"):
+        print(_missing_key_banner(), flush=True)
+        # aborta o start pra ficar claro
+        raise RuntimeError("OPENAI_API_KEY ausente")
+    yield
+app.router.lifespan_context = app_lifespan
+ACTIVE_REQUESTS = 0                   # requisições sendo atendidas agora
+SESSIONS_LAST_SEEN = {}               # sid -> epoch seconds
+METRICS_STARTED_AT = time.time()
+ACTIVE_WINDOW_SECONDS = int(os.environ.get("ACTIVE_WINDOW_SECONDS", "300"))  # 5 min
+
+def _extract_client_id(request):
+    # tenta header setado pelo front (recomendado), senão X-Forwarded-For (ngrok/proxy), senão IP
+    sid = request.headers.get("x-client-id")
+    if not sid:
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            sid = fwd.split(",")[0].strip()
+        else:
+            sid = (request.client.host if request.client else "unknown")
+    return sid
+
+class TrafficMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        global ACTIVE_REQUESTS
+        sid = _extract_client_id(request)
+        now = time.time()
+        SESSIONS_LAST_SEEN[sid] = now
+        ACTIVE_REQUESTS += 1
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            ACTIVE_REQUESTS -= 1
+
+app.add_middleware(TrafficMiddleware)
+
+@app.get("/stats")
+def stats():
+    now = time.time()
+    active_window = sum(1 for t in SESSIONS_LAST_SEEN.values() if now - t <= ACTIVE_WINDOW_SECONDS)
+    return {
+        "started_at": METRICS_STARTED_AT,
+        "active_requests_now": ACTIVE_REQUESTS,
+        "active_sessions_last_minutes": active_window,
+        "window_seconds": ACTIVE_WINDOW_SECONDS,
+        "unique_sessions_total": len(SESSIONS_LAST_SEEN),
+    }
 
 # =========================
 # Constantes
@@ -106,26 +182,33 @@ def call_list_csvs():
 def _sqlite_exec(q: str, params: list | tuple = ()):
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
-    cur = con.execute(q, params)
-    rows = [dict(r) for r in cur.fetchall()]
-    con.close()
-    return rows
+    try:
+        cur = con.execute(q, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        return rows
+    finally:
+        con.close()
 
 def _sqlite_cols(table: str) -> list[str]:
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
-    cols = [r["name"] for r in con.execute(f'PRAGMA table_info("{table}")').fetchall()]
-    con.close()
-    return cols
+    try:
+        cols = [r["name"] for r in con.execute(f'PRAGMA table_info("{table}")').fetchall()]
+        return cols
+    finally:
+        con.close()
 
 def _table_exists(table: str) -> bool:
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
-    ok = con.execute(
-        'SELECT 1 FROM sqlite_master WHERE type="table" AND name=? LIMIT 1', (table,)
-    ).fetchone() is not None
-    con.close()
-    return ok
+    try:
+        ok = con.execute(
+            'SELECT 1 FROM sqlite_master WHERE type="table" AND name=? LIMIT 1', (table,)
+        ).fetchone() is not None
+        return ok
+    finally:
+        con.close()
+
 def _sniff_sep(file_path: str) -> str:
     # Lê primeiras linhas e escolhe o separador com maior ocorrência no header
     try:
@@ -139,6 +222,7 @@ def _sniff_sep(file_path: str) -> str:
     # escolhe o que mais aparece; fallback para ';' e depois ','
     sep = max(counts, key=counts.get) if any(counts.values()) else ";"
     return sep
+
 def _import_csv_to_sqlite(temp_csv_path: str, table: str) -> dict:
     """Importa CSV para SQLite com heurística de separador e em chunks."""
     con = sqlite3.connect(DB_PATH)
@@ -209,6 +293,7 @@ async def upload_csv(file: UploadFile = File(...), table: str = Form(None)):
 
     try:
         info = _import_csv_to_sqlite(tmp_path, safe_table)
+        rebuild_catalog()         
         return {"status": "ok", "db": DB_PATH, "table": safe_table, **info}
     finally:
         try:
@@ -254,7 +339,104 @@ def ingest_all_fn(recursive: bool = False):
 # endpoint manual (Swagger)
 @app.post("/tool/ingest_all")
 def call_ingest_all(recursive: bool = Query(False, description="Se true, percorre subpastas de data/")):
-    return ingest_all_fn(recursive=recursive)
+    res = ingest_all_fn(recursive=recursive)  # importa primeiro
+    rebuild_catalog()                          # depois reconstrói o catálogo
+    return res
+
+
+# --- normalização / tokenização leves ---
+
+_PT_STOP = {"de","da","do","das","dos","e","em","no","na","nos","nas","com","por","para","a","o","os","as"}
+_SYNONYMS = {
+    "estoque": {"estoque","stock"},
+    "ajuste": {"ajuste","ajustes","ajust"},
+    "devolucao": {"devolucao","devolucoes","devoluções","devol","troca","retorno","return"},
+    "cancelamento": {"cancelamento","cancel","canc"},
+    "inventario": {"inventario","inventário","invent"},
+    "saida": {"saida","saída","out"},
+    # conceitos úteis
+    "sku": {"sku","produto","prod","codigo_produto","codigo"},
+    "data": {"data","dt","datacancelamento","data_devolucao","data_devolucoes","datadev"},
+    "loja": {"loja","filial","store"},
+    "valor": {"valor","valorbruto","preco","preço","amount"},
+}
+
+def _strip_accents(s:str)->str:
+    return ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c))
+
+def _norm_text(s:str)->str:
+    return re.sub(r'[^a-z0-9]+',' ', _strip_accents(s.lower())).strip()
+
+def _tokens(s:str)->set[str]:
+    toks = {t for t in _norm_text(s).split() if t and t not in _PT_STOP}
+    expanded = set(toks)
+    for base, syns in _SYNONYMS.items():
+        if base in toks or (toks & syns):
+            expanded |= syns | {base}
+    return expanded
+
+def _tag_of_column(col: str)->set[str]:
+    c = _norm_text(col)
+    tags = set()
+    if re.search(r'\b(loja|filial|store)\b', c): tags.add("store")
+    if re.search(r'\b(sku|produto|prod|codigo|codigo_produto)\b', c): tags.add("sku")
+    if re.search(r'\b(data|dt)\b', c): tags.add("date")
+    if re.search(r'\b(valor|preco|amount|bruto)\b', c): tags.add("amount")
+    if re.search(r'\b(qtd|qtde|quant|movimentada|ajuste)\b', c): tags.add("quantity")
+    if re.search(r'\b(ajuste|estoque|stock)\b', c): tags.add("adjust")
+    if re.search(r'\b(devol)\b', c): tags.add("return")
+    if re.search(r'\b(cancel)\b', c): tags.add("cancel")
+    return tags
+
+# 🔹 NOVO: tags a partir do nome da tabela
+def _tags_from_tokens(tokens: set[str]) -> set[str]:
+    tags = set()
+    if tokens & _SYNONYMS.get("ajuste", set()):        tags.add("adjust")
+    if tokens & _SYNONYMS.get("estoque", set()):       tags.add("adjust")
+    if tokens & _SYNONYMS.get("devolucao", set()):     tags.add("return")
+    if tokens & _SYNONYMS.get("cancelamento", set()):  tags.add("cancel")
+    if tokens & _SYNONYMS.get("sku", set()):           tags.add("sku")
+    if tokens & _SYNONYMS.get("data", set()):          tags.add("date")
+    if tokens & _SYNONYMS.get("loja", set()):          tags.add("store")
+    if tokens & _SYNONYMS.get("valor", set()):         tags.add("amount")
+    return tags
+
+CATALOG = {}  # table -> {"tokens","columns","col_tags","table_tags"}
+
+def rebuild_catalog():
+    global CATALOG
+    CATALOG = {}
+    tabs = _sqlite_exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    for r in tabs:
+        tname = r["name"]
+        cols = [c["name"] for c in _sqlite_exec(f'PRAGMA table_info("{tname}")')]
+        t_tokens = _tokens(tname)
+        col_tags = {c: _tag_of_column(c) for c in cols}
+        name_tags = _tags_from_tokens(t_tokens)  # <- usa nome da tabela
+        t_tags = (set().union(*col_tags.values()) if col_tags else set()) | name_tags
+        CATALOG[tname] = {"tokens": t_tokens, "columns": cols, "col_tags": col_tags, "table_tags": t_tags}
+
+def list_tables() -> list[str]:
+    return list(CATALOG.keys())
+
+def resolve_table_from_text(msg: str, required_tags: set[str]|None=None) -> str|None:
+    if not CATALOG:
+        rebuild_catalog()
+    qtok = _tokens(msg)
+    best, best_score = None, -1
+    qnorm = _norm_text(msg)
+    for tname, info in CATALOG.items():
+        base = len(qtok & info["tokens"])
+        tag_bonus = 0
+        if required_tags:
+            tag_bonus = 2 * len(required_tags & info["table_tags"])
+        name_hit = 1 if _norm_text(tname) in qnorm else 0
+        score = base + tag_bonus + name_hit
+        if score > best_score:
+            best, best_score = tname, score
+    return best if best_score >= 1 else None
+
+
 # =========================
 # SQL tools (consultas)
 # =========================
@@ -286,34 +468,76 @@ def sql_aggregate_fn(table: str, by: str, value: str | None = None, op: str = "s
     q = f'SELECT "{by}" AS chave, {agg_expr} AS valor FROM "{table}" GROUP BY "{by}" ORDER BY valor DESC LIMIT ?'
     rows = _sqlite_exec(q, [max(1, int(top))])
     return {"status": "ok", "rows": rows}
-def _guess_cols(table: str):
-    """Tenta descobrir nomes das colunas-chave: sku, loja, data (case-insensitive)."""
-    cols = _sqlite_cols(table)
-    norm = {c.lower(): c for c in cols}
 
-    def pick(*aliases):
-        for a in aliases:
-            # casa exato
-            if a.lower() in norm: return norm[a.lower()]
-            # procura por substring
-            for c in cols:
-                if a.lower() in c.lower():
+def _guess_cols(table: str):
+    """Escolhe SKU / LOJA / DATA priorizando:
+    (1) match exato normalizado, (2) match por palavra (com borda),
+    (3) substring como último recurso. Evita confundir 'PRODUTO' com 'VALORVENDAPRODUTO' etc.
+    """
+    cols = _sqlite_cols(table)
+
+    def norm(s: str) -> str:
+        # normaliza para comparar ignorando _ e acentos/caixa
+        return re.sub(r'[^a-z0-9]+', '', s.lower())
+
+    def find_col(candidates: list[str]) -> str | None:
+        # 1) match exato normalizado
+        norm_map = {norm(c): c for c in cols}
+        for cand in candidates:
+            hit = norm_map.get(norm(cand))
+            if hit:
+                return hit
+
+        # 2) match por palavra com bordas (evita pegar '...PRODUTO...' dentro de 'VALORVENDAPRODUTO')
+        for c in cols:
+            lc = re.sub(r'[_]+', ' ', c.lower())
+            for cand in candidates:
+                if re.search(r'\b' + re.escape(cand.lower()) + r'\b', lc):
+                    return c
+
+        # 3) fallback por substring
+        for c in cols:
+            lc = c.lower()
+            for cand in candidates:
+                if cand.lower() in lc:
                     return c
         return None
 
-    sku  = pick("SKU")
-    loja = pick("LOJA", "ID_LOJA", "LOJACOD", "FILIAL")
-    data = pick("DATA", "DATACANCELAMENTO", "DATA_DEVOLUCAO", "DATADEVOLUCAO", "DATAVENDA", "DT_MOV", "DTMOV")
+    sku  = find_col(["SKU","COD_SKU","CODIGO_PRODUTO","PRODUTO","CODPROD","COD_PROD","ID_SKU","IDPRODUTO"])
+    loja = find_col(["LOJA","ID_LOJA","LOJACOD","FILIAL","STORE","COD_LOJA","CODFILIAL"])
+    data = find_col(["DATA","DATACANCELAMENTO","DATA_DEVOLUCAO","DATA_DEVOLUCOES","DATADEVOLUCAO",
+                     "DATADEV","DATAVENDA","DT_MOV","DTMOV","DTMOVTO"])
+
     return {"sku": sku, "loja": loja, "data": data, "all": cols}
 
-def _date_expr_ddmmyyyy(col: str) -> str:
-    """Converte texto DD/MM/AAAA -> 'YYYY-MM-DD' para comparar com date()."""
-    # substr(col,7,4)||'-'||substr(col,4,2)||'-'||substr(col,1,2)
-    return f"substr(\"{col}\",7,4)||'-'||substr(\"{col}\",4,2)||'-'||substr(\"{col}\",1,2)"
+# 🔹 DATA AUTO: aceita AAAA-MM-DD (ISO) ou DD/MM/AAAA
+def _date_expr_auto(col: str) -> str:
+    # Se tiver '-', assume ISO e pega os 10 primeiros; senão, converte de DD/MM/AAAA
+    return (
+        f"CASE WHEN instr(\"{col}\", '-')=5 "  # posição do primeiro '-' em 'YYYY-'
+        f"THEN substr(\"{col}\",1,10) "
+        f"ELSE substr(\"{col}\",7,4)||'-'||substr(\"{col}\",4,2)||'-'||substr(\"{col}\",1,2) END"
+    )
 
-def sku_intersection_fn(ajustes: str, devol: str, loja: str | int, start: str, end: str, limit: int = 100):
-    if not _table_exists(ajustes):  return {"status":"error","message":f"Tabela não encontrada: {ajustes}"}
-    if not _table_exists(devol):    return {"status":"error","message":f"Tabela não encontrada: {devol}"}
+def sku_intersection_fn(
+    ajustes: str|None = None,
+    devol: str|None = None,
+    loja: int|str|None = None,
+    start: str|None = None,
+    end: str|None = None,
+    limit: int = 100,
+):
+  
+    if not CATALOG:
+        rebuild_catalog()
+
+    if not ajustes:
+        ajustes = next((t for t, info in CATALOG.items() if {"adjust", "sku"} <= info["table_tags"]), None)
+    if not devol:
+        devol   = next((t for t, info in CATALOG.items() if {"return", "sku"} <= info["table_tags"]), None)
+
+    if not _table_exists(ajustes) or not _table_exists(devol):
+        return {"status":"error","message":f"Tabelas não encontradas (ajustes={ajustes}, devol={devol})"}
 
     a = _guess_cols(ajustes)
     d = _guess_cols(devol)
@@ -327,8 +551,8 @@ def sku_intersection_fn(ajustes: str, devol: str, loja: str | int, start: str, e
     except:
         return {"status":"error","message":"Parâmetro `loja` inválido (use número, ex.: 17)."}
 
-    a_date = _date_expr_ddmmyyyy(a["data"])
-    d_date = _date_expr_ddmmyyyy(d["data"])
+    a_date = _date_expr_auto(a["data"])
+    d_date = _date_expr_auto(d["data"])
 
     q = f'''
     SELECT DISTINCT a."{a['sku']}" AS SKU
@@ -343,6 +567,7 @@ def sku_intersection_fn(ajustes: str, devol: str, loja: str | int, start: str, e
     '''
     rows = _sqlite_exec(q, [loja_int, loja_int, start, end, start, end, max(1,int(limit))])
     return {"status":"ok","rows":rows, "tables":{"ajustes":ajustes, "devol":devol}}
+
 def _resolve_col(table: str, name: str) -> str | None:
     """Mapeia coluna case-insensitive para o nome real da tabela."""
     cols = _sqlite_cols(table)
@@ -434,14 +659,15 @@ def call_sql_filter(
 # endpoints manuais (opcionais p/ depurar sem LLM)
 @app.get("/tool/sku_intersection")
 def call_sku_intersection(
-    ajustes: str = Query(..., description="ex.: ajustes_estoque_2025"),
-    devol:   str = Query(..., description="ex.: devolucao"),
-    loja:    str = Query(..., description="ex.: 17 ou 017"),
-    start:   str = Query(..., description="AAAA-MM-DD"),
-    end:     str = Query(..., description="AAAA-MM-DD"),
-    limit:   int = Query(100)
+    ajustes: str | None = Query(None, description="ex.: ajustes_estoque_2025 (opcional)"),
+    devol:   str | None = Query(None, description="ex.: devolucao (opcional)"),
+    loja:    str       = Query(...,  description="ex.: 17 ou 017"),
+    start:   str       = Query(...,  description="AAAA-MM-DD"),
+    end:     str       = Query(...,  description="AAAA-MM-DD"),
+    limit:   int       = Query(100)
 ):
     return sku_intersection_fn(ajustes, devol, loja, start, end, limit)
+
 @app.get("/tool/sql_head")
 def call_sql_head(table: str = Query(...), n: int = Query(5)):
     return sql_head_fn(table, n)
@@ -456,13 +682,27 @@ def call_sql_aggregate(
 ):
     return sql_aggregate_fn(table, by, value, op, top)
 
+# após definir DB_PATH e helpers:
+rebuild_catalog()
+
+@app.get("/catalog")
+def catalog():
+    return {t: {
+        "columns": info["columns"],
+        "table_tags": sorted(info["table_tags"])
+    } for t, info in CATALOG.items()}
+
 
 # =========================
 # Registro das tools e Agent 
 # =========================
 sku_intersection_tool = tool(
     name="sku_intersection",
-    description="Lista SKUs que aparecem em ambas as tabelas (ajustes & devolução) na mesma loja e período."
+     description=(
+        "Calcula a interseção de SKUs entre duas TABELAS distintas, aplicando os mesmos filtros de loja e período. "
+        "Parâmetros: ajustes (opcional), devol (opcional), loja (ex.: 17), start (AAAA-MM-DD), end (AAAA-MM-DD), limit. "
+        "Se os nomes das tabelas não forem informados, a ferramenta escolhe automaticamente com base no catálogo e nas tags."
+    )
 )(sku_intersection_fn)
 
 head_csv_tool = tool(
@@ -484,24 +724,34 @@ sql_aggregate_tool = tool(
     name="sql_aggregate",
     description="Agrega valores por categoria na tabela do SQLite. op: sum/count/avg/min/max."
 )(sql_aggregate_fn)
+
 sql_filter_tool = tool(
     name="sql_filter",
     description="Filtra linhas no SQLite com operadores: eq, ne, gt, gte, lt, lte, in, contains, icontains."
 )(sql_filter_fn)
-def _rows_to_md(rows: list[dict]) -> str:
+
+def _rows_to_html(rows: list[dict]) -> str:
     if not rows:
-        return "_sem resultados_"
+        return "<em>sem resultados</em>"
     cols = list(rows[0].keys())
-    head = "| " + " | ".join(cols) + " |"
-    sep  = "| " + " | ".join(["---"] * len(cols)) + " |"
-    body = "\n".join("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |" for r in rows)
-    return "\n".join([head, sep, body])
+    thead = "<thead><tr>" + "".join(f"<th>{html.escape(str(c))}</th>" for c in cols) + "</tr></thead>"
+    body_rows = []
+    for r in rows:
+        tds = "".join(f"<td>{html.escape(str(r.get(c, '')))}</td>" for c in cols)
+        body_rows.append(f"<tr>{tds}</tr>")
+    tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
+    return f"<table>{thead}{tbody}</table>"
 
 def fastpath_markdown(msg: str) -> str | None:
     m = re.search(r"filtr(a|e)\s+(.+?)\s+em\s+([A-Za-z0-9_\.]+)(?:.*?(?:até|limite)\s+(\d+))?", msg, re.I)
     if m:
         conds_str, table, limit_s = m.group(2), m.group(3), m.group(4)
-        if not table.lower().endswith(".csv") and _table_exists(table):
+        if not table.lower().endswith(".csv"):
+            chosen = table if _table_exists(table) else resolve_table_from_text(msg, required_tags={"date","store","sku"} if "sku" in msg.lower() else None)
+            if chosen and _table_exists(chosen):
+                table = chosen
+            else:
+                return "<div class='muted'>Não reconheci a tabela citada. Use um nome próximo do arquivo ou faça upload em /docs.</div>"
             # parse condições no formato: COL=VAL, COL>VAL, COL<VAL, COL>=VAL, COL<=VAL, COL!=VAL
             parts = re.split(r"\s*(?:,| e )\s*", conds_str, flags=re.I)
             where = {}
@@ -515,16 +765,18 @@ def fastpath_markdown(msg: str) -> str | None:
                         val = right.strip().strip('"\'')
                         # tenta número pt-BR
                         if op in {"gt","gte","lt","lte"}:
-                            try: val = float(val.replace(",", "."))
-                            except: pass
+                            try:
+                                val = float(val.replace(",", "."))
+                            except:
+                                pass
                         key = f"{col}__{op}" if op != "eq" else col
                         where[key] = val
                         break
             lim = int(limit_s) if limit_s else 100
             res = sql_filter_fn(table, where, lim)
             if res.get("status") == "ok":
-                md = _rows_to_md(res["rows"])
-                return f"**Filtro em `{table}` (SQLite):**\n\n{md}"
+                html_table = _rows_to_html(res["rows"])
+                return f"<h3>Filtro em <code>{table}</code> (SQLite)</h3>{html_table}"
 
 def _rows_to_md(rows: list[dict]) -> str:
     if not rows:
@@ -535,44 +787,19 @@ def _rows_to_md(rows: list[dict]) -> str:
     body = "\n".join("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |" for r in rows)
     return "\n".join([head, sep, body])
 
-def fastpath_markdown(msg: str) -> str | None:
-    m = re.search(r"filtr(a|e)\s+(.+?)\s+em\s+([A-Za-z0-9_\.]+)(?:.*?(?:até|limite)\s+(\d+))?", msg, re.I)
-    if m:
-        conds_str, table, limit_s = m.group(2), m.group(3), m.group(4)
-        if not table.lower().endswith(".csv") and _table_exists(table):
-            # parse condições no formato: COL=VAL, COL>VAL, COL<VAL, COL>=VAL, COL<=VAL, COL!=VAL
-            parts = re.split(r"\s*(?:,| e )\s*", conds_str, flags=re.I)
-            where = {}
-            for p in parts:
-                op = None
-                for sym, tag in [(">=","gte"),("<=","lte"),("!=","ne"),(">","gt"),("<","lt"),("=","eq")]:
-                    if sym in p:
-                        left, right = p.split(sym, 1)
-                        op = tag
-                        col = left.strip()
-                        val = right.strip().strip('"\'')
-                        # tenta número pt-BR
-                        if op in {"gt","gte","lt","lte"}:
-                            try: val = float(val.replace(",", "."))
-                            except: pass
-                        key = f"{col}__{op}" if op != "eq" else col
-                        where[key] = val
-                        break
-            lim = int(limit_s) if limit_s else 100
-            res = sql_filter_fn(table, where, lim)
-            if res.get("status") == "ok":
-                md = _rows_to_md(res["rows"])
-                return f"**Filtro em `{table}` (SQLite):**\n\n{md}"
 agent = Agent(
     name="sentinela",
     system_message=(
-        "Você é o Sentinela. Sempre use ferramentas para obter dados. "
-        "Prefira as ferramentas SQL (`sql_head`, `sql_aggregate`) quando o usuário citar uma TABELA. "
-        "Se o usuário citar um nome de arquivo CSV, use a tabela com o mesmo nome do arquivo (sem extensão, em minúsculas), "
-        "por exemplo CANCELAMENTO_2025.csv -> cancelamento_2025. "
-        "Responda em no máximo 2 frases e mostre no máximo 10 linhas/tópicos. Nunca invente dados."
+        "Você é o Sentinela. Sempre use ferramentas para obter dados (SQLite/CSV) e nunca invente. "
+        "Priorize SQLite sempre que existir tabela equivalente. "
+        "Escolha a ferramenta pelo tipo de intenção:\n"
+        "• Visualizar primeiras linhas de uma TABELA → sql_head.\n"
+        "• Filtrar por colunas/condições → sql_filter.\n"
+        "• Agregar (sum, count, avg, min, max) → sql_aggregate.\n"
+        "• Descobrir SKUs presentes em DUAS TABELAS (mesmos filtros) → sku_intersection.\n"
+        "Converta períodos de tempo para datas AAAA-MM-DD quando necessário, normalize códigos de loja (remova zeros à esquerda) "
     ),
-    tools=[head_csv_tool, list_csvs_tool, sql_head_tool, sql_aggregate_tool, sql_filter_tool,sku_intersection_tool],
+    tools=[head_csv_tool, list_csvs_tool, sql_head_tool, sql_aggregate_tool, sql_filter_tool, sku_intersection_tool],
     model=OpenAIChat(id="gpt-4o-mini")
 )
 
@@ -596,18 +823,23 @@ def chat(in_: ChatIn):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/chat_html", response_class=HTMLResponse)
 @app.post("/chat_html", response_class=HTMLResponse)
 def chat_html(message: str = None, in_: ChatIn = None):
     msg = message or (in_.message if in_ else "")
-    md = fastpath_markdown(msg)
-    if md is not None:
-        html = markdown.markdown(md)
-        return f"<div class='reply'>{html}</div>"
+    fast = fastpath_markdown(msg)
+    if fast is not None:
+        # se o fast-path já devolveu HTML, não passe pelo markdown.markdown
+        if fast.lstrip().startswith("<"):
+            return f"<div class='reply'>{fast}</div>"
+        html_md = markdown.markdown(fast)
+        return f"<div class='reply'>{html_md}</div>"
 
     response = agent.run(msg)
-    html = markdown.markdown(response.content)
-    return f"<div class='reply'>{html}</div>"
+    html_md = markdown.markdown(response.content)
+    return f"<div class='reply'>{html_md}</div>"
+
 @app.get("/", response_class=HTMLResponse)
 def chat_ui():
     return HTMLResponse(
@@ -636,9 +868,21 @@ def chat_ui():
   .reply table td,.reply table th{border:1px solid #21314f;padding:8px}
   .reply code{background:#0e223e;padding:2px 6px;border-radius:6px}
   .typing{align-self:flex-start;color:var(--muted);font-style:italic}
+  .metrics{
+    position: fixed; top: 12px; right: 12px;
+    background: var(--card); border:1px solid #26344d;
+    padding: 6px 10px; border-radius: 10px; font-size:12px;
+    color: var(--muted); display:flex; align-items:center; gap:8px;
+    z-index: 50;
+  }
+  .metrics .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block}
+  .metrics .dot.warn{background:#f59e0b}
+  .metrics .dot.err{background:#ef4444}
+  .metrics b{color:#e8eefc}
 </style>
 </head>
 <body>
+ <div id="metrics" class="metrics" title="Métricas em tempo real">carregando…</div>
   <div class="wrap">
     <div class="title">🛡️ Sentinela — Chat</div>
     <div id="chat" class="chat"></div>
@@ -654,6 +898,14 @@ def chat_ui():
   const chatEl = document.getElementById('chat');
   const msgEl  = document.getElementById('msg');
   const btnEl  = document.getElementById('send');
+
+  // 🔹 SID GLOBAL (antes de qualquer fetch)
+  const SID_KEY = 'sentinela_sid';
+  let SID = localStorage.getItem(SID_KEY);
+  if(!SID){
+    SID = (crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Math.random()).slice(2);
+    localStorage.setItem(SID_KEY, SID);
+  }
 
   function addBubble(text, who='bot', isHTML=false){
     const div = document.createElement('div');
@@ -680,9 +932,13 @@ def chat_ui():
 
     const typing = addTyping();
     try{
+      // ✅ UMA chamada só, com X-Client-Id
       const res = await fetch('/chat_html', {
         method:'POST',
-        headers:{'Content-Type':'application/json'},
+        headers:{
+          'Content-Type':'application/json',
+          'X-Client-Id': SID
+        },
         body: JSON.stringify({message: text})
       });
       const html = await res.text();
@@ -700,9 +956,35 @@ def chat_ui():
   btnEl.addEventListener('click', send);
   msgEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); send(); }});
 
-  addBubble('Oi! Eu sou o Sentinela. Depois de fazer upload em /docs → POST /upload_csv, pergunte: \"mostre as 5 primeiras linhas de cancelamento_2025\".', 'bot', false);
+  // Mensagem de boas-vindas
+  addBubble('Oi! Eu sou o Sentinela. Depois de fazer upload em /docs → POST /upload_csv, pergunte: "mostre as 5 primeiras linhas de cancelamento_2025".', 'bot', false);
+
+  // 🔹 Badge de métricas
+  const metricsEl = document.getElementById('metrics');
+
+  function fmt(n){ try{ return Number(n).toLocaleString('pt-BR'); }catch(_){ return n; } }
+
+  async function pollStats(){
+    try{
+      const r = await fetch('/stats', { headers: {'X-Client-Id': SID} });
+      const j = await r.json();
+      const now = j.active_requests_now || 0;
+      const act = j.active_sessions_last_minutes || 0;
+      const winMin = Math.round((j.window_seconds || 300) / 60);
+      const cls = now > 5 ? 'dot err' : (now > 1 ? 'dot warn' : 'dot');
+      metricsEl.innerHTML = `
+        <span class="${cls}"></span>
+        agora: <b>${fmt(now)}</b>
+        &nbsp;•&nbsp;
+        ativos(${winMin}min): <b>${fmt(act)}</b>
+      `;
+    }catch(e){
+      metricsEl.innerHTML = `<span class="dot err"></span> métricas indisponíveis`;
+    }
+  }
+
+  setInterval(pollStats, 5000);
+  pollStats();
 </script>
-</body>
-</html>
         """
     )
