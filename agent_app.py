@@ -1,5 +1,5 @@
 import os, traceback
-from typing import Optional
+from typing import Any, Dict,Optional
 import numpy as np
 import pandas as pd
 import re, unicodedata
@@ -12,7 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from contextlib import asynccontextmanager
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 import html
 
 
@@ -113,7 +113,101 @@ def stats():
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 DB_PATH  = os.path.join(DATA_DIR, "sentinela.db")
 
+# ===== Model routing (planner barato + fallback) =====
+# Modelo primário (pago/seguro)
+PRIMARY_MODEL = os.environ.get("PRIMARY_MODEL", "gpt-4o-mini").strip()
 
+# Modelo "barato/gratuito" para PLANNER/FUNIL (ex.: Groq Llama)
+# Se usar Groq, configure também FREE_API_BASE e FREE_API_KEY.
+FREE_MODEL_ID = os.environ.get("FREE_MODEL_ID", "").strip()  # ex.: "llama-3.1-8b-instant"
+
+# Se o provider "free" for OpenAI-compatível (ex.: Groq):
+FREE_API_BASE = os.environ.get("FREE_API_BASE", "").strip()  # ex.: "https://api.groq.com/openai/v1"
+FREE_API_KEY  = os.environ.get("FREE_API_KEY", "").strip()   # ex.: sua GROQ_API_KEY
+
+# Parâmetros para estabilidade/baixo custo
+MODEL_KW = dict(temperature=0.0)  # zero criatividade; queremos determinismo
+
+import contextlib
+import re as _route_re
+
+# Heurística simples de intenção -> decide quando tentar o modelo "free"
+INTENT_PATTERNS = [
+    ("sql_head",        _route_re.compile(r"\b(cabeçalho|primeir[ao]s?\s+\d+|head|amostra|mostre)\b", _route_re.I)),
+    ("sql_filter",      _route_re.compile(r"\b(filtr|onde|where|igual|maior|menor|contém|contains)\b", _route_re.I)),
+    ("sql_aggregate",   _route_re.compile(r"\b(sum|soma|média|avg|count|agreg|top\s*\d+)\b", _route_re.I)),
+    ("sku_intersection",_route_re.compile(r"\b(interse(c|ç)[aã]o|aparecem\s+em\s+ambas|ajuste.*devol|devol.*ajuste)\b", _route_re.I)),
+]
+
+def _intent_hint(msg: str) -> str:
+    if _route_re.search(r"\bsku\b.*\bdevol|\bdevol\b.*\bsku", msg or "", _route_re.I):
+        return "sku_intersection"
+    for name, pat in INTENT_PATTERNS:
+        if pat.search(msg or ""):
+            return name
+    return "generic"
+
+def _make_model(model_id: str, provider: str = "primary"):
+    """
+    Cria um objeto OpenAIChat para o provider indicado.
+    - primary: usa OPENAI_API_KEY padrão
+    - free: se FREE_API_BASE e FREE_API_KEY estiverem setados (ex.: Groq), usa esse endpoint.
+    """
+    from agno.models.openai import OpenAIChat
+    if provider == "free" and FREE_API_BASE and FREE_API_KEY:
+        return OpenAIChat(id=model_id, base_url=FREE_API_BASE, api_key=FREE_API_KEY, **MODEL_KW)
+    # fallback: usa o provedor padrão (OpenAI) com OPENAI_API_KEY
+    return OpenAIChat(id=model_id, **MODEL_KW)
+
+def _route_model(msg: str) -> tuple[str, str]:
+    """
+    Decide (provider, model_id).
+    Regra: intents estruturadas e prompt curto -> tentar 'free' primeiro se existir.
+    """
+    intent = _intent_hint(msg or "")
+    if FREE_MODEL_ID and intent in {"sql_head","sql_filter","sql_aggregate","sku_intersection"} and len(msg or "") <= 700:
+        return ("free", FREE_MODEL_ID)
+    return ("primary", PRIMARY_MODEL)
+
+def _needs_fallback(answer_text: str) -> bool:
+    """
+    Heurística conservadora: se a saída indicar erro/vazio típico,
+    repetimos com modelo primário.
+    """
+    if not answer_text or len(answer_text.strip()) == 0:
+        return True
+    low = answer_text.lower()
+    bad_markers = [
+        "não reconheci a tabela",
+        "tabela não encontrada",
+        "coluna não existe",
+        '"status": "error"',
+        "status\":\"error",
+        # quando o LLM falha e não aciona tool-path
+        "não consigo acessar",
+        "não tenho dado suficiente",
+    ]
+    return any(b in low for b in bad_markers)
+
+def _run_with_retry(agent_obj, message: str, max_attempts: int = 2):
+    """
+    Executa agent.run com pequeno retry em erros transitórios (429/5xx).
+    Retorna (ok: bool, text: str, err: Exception|None)
+    """
+    last_err = None
+    for _ in range(max_attempts):
+        try:
+            resp = agent_obj.run(message)
+            return True, (resp.content or ""), None
+        except Exception as e:
+            last_err = e
+            msg = str(e).lower()
+            # sinais comuns de rate limit / indisponibilidade
+            if any(x in msg for x in ["rate limit", "429", "temporarily unavailable", "timeout", "service unavailable", "overloaded"]):
+                time.sleep(0.4)  # backoff leve
+                continue
+            break
+    return False, "", last_err
 # =========================
 # CSV (legacy) - funções + endpoints
 # =========================
@@ -156,6 +250,11 @@ def head_csv_fn(filename: str, n: int = 5):
     except Exception as e:
         return {"status": "error", "message": f"{type(e).__name__}: {e}"}
 
+ALLOWED_TOOLS = {"sql_head", "sql_filter", "sql_aggregate", "sku_intersection", "head_csv", "list_csvs"}
+
+class Plan(BaseModel):
+    tool: str = Field(description=f"Uma das ferramentas: {sorted(ALLOWED_TOOLS)}")
+    params: Dict[str, Any] = Field(default_factory=dict)
 
 class HeadIn(BaseModel):
     filename: str
@@ -436,6 +535,92 @@ def resolve_table_from_text(msg: str, required_tags: set[str]|None=None) -> str|
             best, best_score = tname, score
     return best if best_score >= 1 else None
 
+def _mini_schema_for_prompt(user_msg: str, max_tables: int = 5, max_cols: int = 12) -> dict:
+    """Gera um mini catálogo focado no que a pessoa provavelmente quer, para reduzir tokens."""
+    if not CATALOG:
+        rebuild_catalog()
+    toks = _tokens(user_msg)
+    scored = []
+    for tname, info in CATALOG.items():
+        # score simples: overlap de tokens + tags
+        score = len(toks & info["tokens"]) + len(toks & info["table_tags"])
+        scored.append((score, tname, info))
+    scored.sort(reverse=True, key=lambda x: x[0])
+    top = []
+    for _, tname, info in scored[:max_tables]:
+        cols = info["columns"][:max_cols]
+        top.append({"table": tname, "columns": cols, "tags": sorted(info["table_tags"])})
+    return {"tables": top}
+
+def _planner_prompt(user_msg: str) -> str:
+    schema = _mini_schema_for_prompt(user_msg)
+    return (
+        "Você é um PLANEJADOR de chamadas de ferramenta. Retorne SOMENTE JSON válido, sem texto extra.\n"
+        "Escolha exatamente UMA ferramenta entre: sql_head, sql_filter, sql_aggregate, sku_intersection, head_csv, list_csvs.\n"
+        "Regras:\n"
+        "- Para ver amostra de uma TABELA: sql_head {table, n}.\n"
+        "- Para filtrar LINHAS: sql_filter {table, where(objeto), limit, order_by?, order?}.\n"
+        "- Para agregação: sql_aggregate {table, by, value?, op, top}.\n"
+        "- Para interseção de SKUs: sku_intersection {ajustes?, devol?, loja, start, end, limit?}.\n"
+        "- Para CSV legacy: head_csv {filename, n}; list_csvs {}.\n"
+        "- Normalize loja removendo zeros à esquerda (ex.: '017' -> 17) APENAS ao preencher o campo loja.\n"
+        "- Não invente nomes de tabelas/colunas. Prefira as do catálogo abaixo.\n"
+        "- Se estiver ambíguo, use sql_head na tabela mais provável.\n"
+        "Formato de saída JSON:\n"
+        "{ \"tool\": \"sql_head\", \"params\": { ... } }\n\n"
+        f"Catálogo enxuto: {json.dumps(schema, ensure_ascii=False)}\n\n"
+        f"Pedido do usuário: {user_msg}\n"
+    )
+
+def try_planner_then_execute(user_msg: str) -> Optional[str]:
+    """Tenta planejar (modelo free/roteador) e executar a tool. Retorna HTML (ou None se falhar)."""
+    # 1) Escolhe modelo (preferindo o free) e cria um mini-agente sem tools
+    provider, model_id = _route_model(user_msg)
+    planner_model = _make_model(model_id, provider)
+    from agno.agent import Agent
+    planner = Agent(
+        name="planner",
+        system_message="Retorne APENAS JSON válido, sem texto extra.",
+        model=planner_model,
+    )
+
+    prompt = _planner_prompt(user_msg)
+
+    # 2) Chama com retry leve
+    ok, out, err = _run_with_retry(planner, prompt)
+
+    # Fallback para o primário se planner do free falhar ou vier vazio/inválido
+    if (not ok or not out.strip()) and provider != "primary":
+        planner = Agent(
+            name="planner",
+            system_message="Retorne APENAS JSON válido, sem texto extra.",
+            model=_make_model(PRIMARY_MODEL, "primary"),
+        )
+        ok, out, err = _run_with_retry(planner, prompt)
+
+    if not ok or not out.strip():
+        return None  # deixa o fluxo antigo cuidar
+
+    # 3) Parse/valida JSON do plano
+    try:
+        plan = Plan.model_validate_json(out)
+    except ValidationError:
+        m = re.search(r"\{.*\}", out, re.S)
+        if not m:
+            return None
+        try:
+            plan = Plan.model_validate_json(m.group(0))
+        except Exception:
+            return None
+
+    if plan.tool not in ALLOWED_TOOLS:
+        return None
+
+    # 4) Executa tool com parâmetros seguros
+    try:
+        return _execute_plan_to_html(plan)
+    except Exception:
+        return None
 
 # =========================
 # SQL tools (consultas)
@@ -742,6 +927,69 @@ def _rows_to_html(rows: list[dict]) -> str:
     tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
     return f"<table>{thead}{tbody}</table>"
 
+def _execute_plan_to_html(plan: Plan) -> str:
+    t = plan.tool
+    p = dict(plan.params or {})
+
+    def to_html_rows(res: dict, title: str) -> str:
+        if not isinstance(res, dict):
+            return f"<div class='muted'>Resposta inesperada de {title}</div>"
+        if res.get("status") != "ok":
+            msg = res.get("message") or res
+            return f"<div class='muted'>Erro em {title}: {html.escape(str(msg))}</div>"
+        rows = res.get("rows") or res.get("preview") or res.get("results")
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            return _rows_to_html(rows)
+        # fallback: mostra json
+        return f"<pre>{html.escape(json.dumps(res, ensure_ascii=False, indent=2))}</pre>"
+
+    if t == "sql_head":
+        table = p.get("table") or resolve_table_from_text("", None)  # tenta algo, mas normalmente planner preenche
+        n = int(p.get("n") or 5)
+        return f"<h3>Amostra de <code>{table}</code></h3>" + to_html_rows(sql_head_fn(table, n), "sql_head")
+
+    if t == "sql_filter":
+        table = p.get("table")
+        where = p.get("where") or {}
+        limit = int(p.get("limit") or 100)
+        order_by = p.get("order_by")
+        order = p.get("order") or "desc"
+        return f"<h3>Filtro em <code>{table}</code></h3>" + to_html_rows(sql_filter_fn(table, where, limit, order_by, order), "sql_filter")
+
+    if t == "sql_aggregate":
+        table = p.get("table")
+        by = p.get("by")
+        value = p.get("value")
+        op = p.get("op") or "sum"
+        top = int(p.get("top") or 10)
+        return f"<h3>Agregação em <code>{table}</code></h3>" + to_html_rows(sql_aggregate_fn(table, by, value, op, top), "sql_aggregate")
+
+    if t == "sku_intersection":
+        return to_html_rows(
+            sku_intersection_fn(
+                ajustes=p.get("ajustes"),
+                devol=p.get("devol"),
+                loja=p.get("loja"),
+                start=p.get("start"),
+                end=p.get("end"),
+                limit=int(p.get("limit") or 100),
+            ),
+            "sku_intersection"
+        )
+
+    if t == "head_csv":
+        return f"<h3>CSV</h3>" + to_html_rows(head_csv_fn(p.get("filename"), int(p.get("n") or 5)), "head_csv")
+
+    if t == "list_csvs":
+        res = list_csvs_fn()
+        files = res.get("files", [])
+        if not files:
+            return "<div class='muted'>Nenhum CSV em data/</div>"
+        lis = "".join(f"<li><code>{html.escape(f)}</code></li>" for f in files)
+        return f"<h3>CSVs disponíveis</h3><ul>{lis}</ul>"
+
+    return "<div class='muted'>Plano com ferramenta não suportada.</div>"
+
 def fastpath_markdown(msg: str) -> str | None:
     m = re.search(r"filtr(a|e)\s+(.+?)\s+em\s+([A-Za-z0-9_\.]+)(?:.*?(?:até|limite)\s+(\d+))?", msg, re.I)
     if m:
@@ -800,13 +1048,21 @@ agent = Agent(
         "Converta períodos de tempo para datas AAAA-MM-DD quando necessário, normalize códigos de loja (remova zeros à esquerda) "
     ),
     tools=[head_csv_tool, list_csvs_tool, sql_head_tool, sql_aggregate_tool, sql_filter_tool, sku_intersection_tool],
-    model=OpenAIChat(id="gpt-4o-mini")
+        model=_make_model(PRIMARY_MODEL, "primary")
+
 )
 
 
 # =========================
 # Chat JSON + Chat HTML + UI
 # =========================
+def render_md(text: str) -> str:
+    # 'tables' transforma |a|b|c| em <table>, 'fenced_code' preserva ```blocks```,
+    # 'sane_lists' melhora listas, e 'nl2br' mantém quebras de linha.
+    return markdown.markdown(
+        text or "",
+        extensions=["tables", "fenced_code", "sane_lists", "nl2br"]
+    )
 class ChatIn(BaseModel):
     message: str
 
@@ -814,12 +1070,28 @@ class ChatIn(BaseModel):
 def chat(in_: ChatIn):
     try:
         msg = (in_.message or "").strip()
+
+        # 0) Fast-path determinístico (regex → sql_filter)
         md = fastpath_markdown(msg)
         if md is not None:
-            return {"answer": md}   # evita chamada ao LLM
+            return {"answer": md}
 
-        response = agent.run(msg)
-        return {"answer": response.content}
+        # 1) Planner JSON → executa tool (se der certo, já retorna HTML pronto)
+        html_from_planner = try_planner_then_execute(msg)
+        if html_from_planner:
+            return {"answer": html_from_planner}
+
+        # 2) Fluxo antigo com roteamento + fallback
+        provider, model_id = _route_model(msg)
+        agent.model = _make_model(model_id, provider)
+        ok, out, err = _run_with_retry(agent, msg)
+
+        if (not ok or _needs_fallback(out)) and provider != "primary":
+            agent.model = _make_model(PRIMARY_MODEL, "primary")
+            ok2, out2, err2 = _run_with_retry(agent, msg)
+            out = out2 or out or f"Erro: {err2 or err}"
+
+        return {"answer": out}
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -827,17 +1099,42 @@ def chat(in_: ChatIn):
 @app.get("/chat_html", response_class=HTMLResponse)
 @app.post("/chat_html", response_class=HTMLResponse)
 def chat_html(message: str = None, in_: ChatIn = None):
-    msg = message or (in_.message if in_ else "")
+    msg = (message or (in_.message if in_ else "") or "").strip()
+
+    # 0) Fast-path determinístico
     fast = fastpath_markdown(msg)
     if fast is not None:
-        # se o fast-path já devolveu HTML, não passe pelo markdown.markdown
+        # se já veio HTML, devolve direto
         if fast.lstrip().startswith("<"):
             return f"<div class='reply'>{fast}</div>"
-        html_md = markdown.markdown(fast)
+        # usa seu helper de markdown com 'tables' se existir
+        try:
+            html_md = render_md(fast)  # recomendado
+        except NameError:
+            html_md = markdown.markdown(fast)
         return f"<div class='reply'>{html_md}</div>"
 
-    response = agent.run(msg)
-    html_md = markdown.markdown(response.content)
+    # 1) Planner JSON
+    html_from_planner = try_planner_then_execute(msg)
+    if html_from_planner:
+        return f"<div class='reply'>{html_from_planner}</div>"
+
+    # 2) Fluxo antigo com roteamento + fallback
+    provider, model_id = _route_model(msg)
+    agent.model = _make_model(model_id, provider)
+    ok, out, err = _run_with_retry(agent, msg)
+
+    if (not ok or _needs_fallback(out)) and provider != "primary":
+        agent.model = _make_model(PRIMARY_MODEL, "primary")
+        ok2, out2, err2 = _run_with_retry(agent, msg)
+        final = out2 if (ok2 and out2) else (out or f"Erro: {err2 or err}")
+    else:
+        final = out or (f"Erro: {err}" if err else "")
+
+    try:
+        html_md = render_md(final)  # recomendado (extensions=['tables',...])
+    except NameError:
+        html_md = markdown.markdown(final)
     return f"<div class='reply'>{html_md}</div>"
 
 @app.get("/", response_class=HTMLResponse)
@@ -865,7 +1162,33 @@ def chat_ui():
   button{padding:12px 16px;border-radius:12px;border:0;background:var(--accent);color:white;font-weight:600;cursor:pointer}
   button[disabled]{opacity:.6;cursor:not-allowed}
   .reply table{border-collapse: collapse; width:100%; overflow:auto}
-  .reply table td,.reply table th{border:1px solid #21314f;padding:8px}
+  .reply table{
+  border-collapse: collapse;
+  width:100%;
+  display:block;          /* permite overflow horizontal */
+  overflow-x:auto;
+  white-space:nowrap;     /* evita quebra feia de células */
+  border:1px solid #21314f;
+  border-radius:8px;
+}
+
+.reply table th, .reply table td{
+  border-bottom:1px solid #21314f;
+  padding:8px 10px;
+  text-align:left;
+}
+
+.reply table thead th{
+  position:sticky;
+  top:0;
+  background:#0e223e;     /* cabeçalho fixo */
+  z-index:1;
+}
+
+.reply table tbody tr:nth-child(even){
+  background:#0c1a30;     /* zebra */
+}
+
   .reply code{background:#0e223e;padding:2px 6px;border-radius:6px}
   .typing{align-self:flex-start;color:var(--muted);font-style:italic}
   .metrics{
