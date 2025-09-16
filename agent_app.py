@@ -4,8 +4,10 @@ import numpy as np
 import pandas as pd
 import re, unicodedata
 import json
+import requests
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
+
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query,Response
 from fastapi.responses import HTMLResponse
 import time
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -106,12 +108,36 @@ def stats():
         "window_seconds": ACTIVE_WINDOW_SECONDS,
         "unique_sessions_total": len(SESSIONS_LAST_SEEN),
     }
+@app.get("/free_health")
+def free_health():
+    base = FREE_API_BASE or ""
+    key  = FREE_API_KEY or ""
+    mid  = FREE_MODEL_ID or ""
+    if not (base and key and mid):
+        return {"ok": False, "reason": "envs ausentes", "FREE_API_BASE": base, "FREE_MODEL_ID": mid, "has_key": bool(key)}
 
+    h = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+    try:
+        r_models = requests.get(f"{base}/models", headers=h, timeout=10)
+        models_ok = (r_models.status_code, r_models.text[:200])
+
+        r_chat = requests.post(f"{base}/chat/completions", headers=h, json={
+            "model": mid,
+            "messages": [{"role":"user","content":"Responda 'pong'."}],
+            "max_tokens": 5
+        }, timeout=15)
+        chat_ok = (r_chat.status_code, r_chat.text[:200])
+
+        return {"ok": True, "models": models_ok, "chat": chat_ok}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 # =========================
 # Constantes
 # =========================
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 DB_PATH  = os.path.join(DATA_DIR, "sentinela.db")
+USE_PLANNER = True 
 
 # ===== Model routing (planner barato + fallback) =====
 # Modelo primário (pago/seguro)
@@ -169,6 +195,27 @@ def _route_model(msg: str) -> tuple[str, str]:
         return ("free", FREE_MODEL_ID)
     return ("primary", PRIMARY_MODEL)
 
+
+_FORCE_RE = _route_re.compile(r'^\s*!(free|primary)\s+', _route_re.I)
+
+def _extract_forced_provider(msg: str) -> tuple[Optional[str], str]:
+    if not msg:
+        return None, msg
+    m = _FORCE_RE.match(msg)
+    if not m:
+        return None, msg
+    prov = m.group(1).lower()
+    clean = msg[m.end():]  
+    return prov, clean
+
+def _set_router_debug_headers(resp: Response, *, msg: str, provider: str):
+    try:
+        intent = _intent_hint(msg)
+    except Exception:
+        intent = "error"
+    resp.headers["X-Router-Intent"] = intent
+    resp.headers["X-Free-Enabled"] = "1" if bool(FREE_MODEL_ID) else "0"
+    resp.headers["X-Forced-Provider"] = provider or ""
 def _needs_fallback(answer_text: str) -> bool:
     """
     Heurística conservadora: se a saída indicar erro/vazio típico,
@@ -211,6 +258,23 @@ def _run_with_retry(agent_obj, message: str, max_attempts: int = 2):
 # =========================
 # CSV (legacy) - funções + endpoints
 # =========================
+def _set_resp_headers(resp: Response, *, provider: str, model_id: str, path: str, fallback: bool=False):
+    resp.headers["X-Model-Provider"] = provider or ""
+    resp.headers["X-Model-Id"] = model_id or ""
+    resp.headers["X-Responder-Path"] = path or ""
+    if fallback:
+        resp.headers["X-Model-Fallback"] = "primary"
+
+def _set_router_debug_headers(resp: Response, *, msg: str, provider: str):
+    try:
+        intent = _intent_hint(msg)
+    except Exception:
+        intent = "error"
+    resp.headers["X-Router-Intent"] = intent
+    resp.headers["X-Free-Enabled"] = "1" if bool(FREE_MODEL_ID) else "0"
+    resp.headers["X-Forced-Provider"] = provider or ""
+
+
 def head_csv_fn(filename: str, n: int = 5):
     os.makedirs(DATA_DIR, exist_ok=True)
     path = os.path.join(DATA_DIR, filename)
@@ -1067,75 +1131,124 @@ class ChatIn(BaseModel):
     message: str
 
 @app.post("/chat")
-def chat(in_: ChatIn):
+def chat(in_: ChatIn, response: Response):
     try:
         msg = (in_.message or "").strip()
 
-        # 0) Fast-path determinístico (regex → sql_filter)
+        # 0) Forçar provider via prefixo (!free / !primary)
+        forced, msg2 = _extract_forced_provider(msg)
+        if forced:
+            msg = msg2  # remove o prefixo da mensagem
+
+        # 1) Fast-path determinístico (sem LLM)
         md = fastpath_markdown(msg)
         if md is not None:
+            _set_resp_headers(response, provider="none", model_id="fastpath", path="fastpath")
+            if "_set_router_debug_headers" in globals():
+                _set_router_debug_headers(response, msg=msg, provider="none")
             return {"answer": md}
 
-        # 1) Planner JSON → executa tool (se der certo, já retorna HTML pronto)
-        html_from_planner = try_planner_then_execute(msg)
-        if html_from_planner:
-            return {"answer": html_from_planner}
+        # 2) (opcional) Planner — só roda se USE_PLANNER=True
+        if 'USE_PLANNER' in globals() and USE_PLANNER:
+            html_from_planner = try_planner_then_execute(msg)
+            if html_from_planner:
+                _set_resp_headers(response, provider="free-or-primary", model_id="planner", path="planner->tool")
+                if "_set_router_debug_headers" in globals():
+                    _set_router_debug_headers(response, msg=msg, provider="planner")
+                if attempted_provider == "free":
+                    response.headers["X-Free-Error"] = (str(err)[:180] if err else "bad-output")    
+                return {"answer": html_from_planner}
 
-        # 2) Fluxo antigo com roteamento + fallback
-        provider, model_id = _route_model(msg)
+        # 3) Agente normal com roteamento + fallback
+        if forced:
+            provider, model_id = (forced, (FREE_MODEL_ID if forced == "free" else PRIMARY_MODEL))
+        else:
+            provider, model_id = _route_model(msg)
+
+        attempted_provider = provider  # guarda quem foi tentado primeiro
         agent.model = _make_model(model_id, provider)
         ok, out, err = _run_with_retry(agent, msg)
 
-        if (not ok or _needs_fallback(out)) and provider != "primary":
+        # fallback para o primário se o free falhar / resposta ruim
+        if (not ok or _needs_fallback(out)) and attempted_provider != "primary":
             agent.model = _make_model(PRIMARY_MODEL, "primary")
             ok2, out2, err2 = _run_with_retry(agent, msg)
-            out = out2 or out or f"Erro: {err2 or err}"
+            _set_resp_headers(response, provider="primary", model_id=PRIMARY_MODEL, path="agent->fallback", fallback=True)
+            if "_set_router_debug_headers" in globals():
+                _set_router_debug_headers(response, msg=msg, provider=attempted_provider)
+            return {"answer": (out2 or out or f"Erro: {err2 or err}")}
 
+        # sucesso na 1ª tentativa
+        _set_resp_headers(response, provider=provider, model_id=model_id, path="agent")
+        if "_set_router_debug_headers" in globals():
+            _set_router_debug_headers(response, msg=msg, provider=attempted_provider)
         return {"answer": out}
+
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @app.get("/chat_html", response_class=HTMLResponse)
 @app.post("/chat_html", response_class=HTMLResponse)
-def chat_html(message: str = None, in_: ChatIn = None):
+def chat_html(message: str = None, in_: ChatIn = None, response: Response = None):
+    # Mensagem final (GET ?message=... ou POST {message})
     msg = (message or (in_.message if in_ else "") or "").strip()
 
-    # 0) Fast-path determinístico
+    # 0) Forçar provider via prefixo (!free / !primary)
+    forced, msg2 = _extract_forced_provider(msg)
+    if forced:
+        msg = msg2  # remove o prefixo da mensagem
+
+    # 1) Fast-path determinístico (sem LLM)
     fast = fastpath_markdown(msg)
     if fast is not None:
-        # se já veio HTML, devolve direto
+        _set_resp_headers(response, provider="none", model_id="fastpath", path="fastpath")
+        if "_set_router_debug_headers" in globals():
+            _set_router_debug_headers(response, msg=msg, provider="none")
         if fast.lstrip().startswith("<"):
             return f"<div class='reply'>{fast}</div>"
-        # usa seu helper de markdown com 'tables' se existir
-        try:
-            html_md = render_md(fast)  # recomendado
-        except NameError:
-            html_md = markdown.markdown(fast)
+        html_md = render_md(fast) if "render_md" in globals() else markdown.markdown(fast)
+        if attempted_provider == "free":
+            response.headers["X-Free-Error"] = (str(err)[:180] if err else "bad-output")         
         return f"<div class='reply'>{html_md}</div>"
 
-    # 1) Planner JSON
-    html_from_planner = try_planner_then_execute(msg)
-    if html_from_planner:
-        return f"<div class='reply'>{html_from_planner}</div>"
+    # 2) (opcional) Planner — só roda se USE_PLANNER=True
+    if 'USE_PLANNER' in globals() and USE_PLANNER:
+        html_from_planner = try_planner_then_execute(msg)
+        if html_from_planner:
+            _set_resp_headers(response, provider="free-or-primary", model_id="planner", path="planner->tool")
+            if "_set_router_debug_headers" in globals():
+                _set_router_debug_headers(response, msg=msg, provider="planner")
+            return f"<div class='reply'>{html_from_planner}</div>"
 
-    # 2) Fluxo antigo com roteamento + fallback
-    provider, model_id = _route_model(msg)
+    # 3) Agente normal com roteamento + fallback
+    if forced:
+        provider, model_id = (forced, (FREE_MODEL_ID if forced == "free" else PRIMARY_MODEL))
+    else:
+        provider, model_id = _route_model(msg)
+
+    attempted_provider = provider  # guarda quem foi tentado primeiro
+
     agent.model = _make_model(model_id, provider)
     ok, out, err = _run_with_retry(agent, msg)
 
-    if (not ok or _needs_fallback(out)) and provider != "primary":
+    if (not ok or _needs_fallback(out)) and attempted_provider != "primary":
+        # fallback para o primário
         agent.model = _make_model(PRIMARY_MODEL, "primary")
         ok2, out2, err2 = _run_with_retry(agent, msg)
         final = out2 if (ok2 and out2) else (out or f"Erro: {err2 or err}")
+        _set_resp_headers(response, provider="primary", model_id=PRIMARY_MODEL, path="agent->fallback", fallback=True)
+        if "_set_router_debug_headers" in globals():
+            _set_router_debug_headers(response, msg=msg, provider=attempted_provider)
     else:
         final = out or (f"Erro: {err}" if err else "")
+        _set_resp_headers(response, provider=provider, model_id=model_id, path="agent")
+        if "_set_router_debug_headers" in globals():
+            _set_router_debug_headers(response, msg=msg, provider=attempted_provider)
 
-    try:
-        html_md = render_md(final)  # recomendado (extensions=['tables',...])
-    except NameError:
-        html_md = markdown.markdown(final)
+    html_md = render_md(final) if "render_md" in globals() else markdown.markdown(final)
     return f"<div class='reply'>{html_md}</div>"
+
 
 @app.get("/", response_class=HTMLResponse)
 def chat_ui():
@@ -1202,6 +1315,16 @@ def chat_ui():
   .metrics .dot.warn{background:#f59e0b}
   .metrics .dot.err{background:#ef4444}
   .metrics b{color:#e8eefc}
+  .msg .badge{
+  margin-top:6px;
+  font-size:12px;
+  color: var(--muted);
+  opacity:.9;
+}
+.msg.bot .badge{
+  text-align:right;
+}
+
 </style>
 </head>
 <body>
@@ -1230,13 +1353,22 @@ def chat_ui():
     localStorage.setItem(SID_KEY, SID);
   }
 
-  function addBubble(text, who='bot', isHTML=false){
-    const div = document.createElement('div');
-    div.className = 'msg ' + (who==='user' ? 'user' : 'bot');
-    if(isHTML){ div.innerHTML = text; } else { div.textContent = text; }
-    chatEl.appendChild(div);
-    chatEl.scrollTop = chatEl.scrollHeight;
+ function addBubble(text, who='bot', isHTML=false, meta=null){
+  const div = document.createElement('div');
+  div.className = 'msg ' + (who==='user' ? 'user' : 'bot');
+  if(isHTML){ div.innerHTML = text; } else { div.textContent = text; }
+
+  if(meta){
+    const m = document.createElement('div');
+    m.className = 'badge';
+    m.textContent = meta;
+    div.appendChild(m);
   }
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+  
   function addTyping(){
     const d = document.createElement('div');
     d.className = 'msg typing';
@@ -1264,9 +1396,17 @@ def chat_ui():
         },
         body: JSON.stringify({message: text})
       });
+      const provider = res.headers.get('X-Model-Provider') || '';
+      const modelId  = res.headers.get('X-Model-Id') || '';
+      const path     = res.headers.get('X-Responder-Path') || '';
+      const fb       = res.headers.get('X-Model-Fallback') ? ' (fallback)' : '';
+      const meta     = [path, provider, modelId].filter(Boolean).join(' • ') + fb;
+
       const html = await res.text();
       typing.remove();
-      addBubble(html, 'bot', true);
+      addBubble(html, 'bot', true, meta);
+
+
     }catch(e){
       typing.remove();
       addBubble('Erro ao falar com o servidor: ' + e, 'bot', false);
