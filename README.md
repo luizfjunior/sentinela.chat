@@ -1,57 +1,86 @@
-# Welcome to your Lovable project
+# Sentinela - AI Chat Assistant
 
-## How can I edit this code?
+Sentinela is an intelligent chat application that provides AI-powered conversations with support for both text and audio interactions. Built with modern web technologies, it features real-time messaging, user authentication, and seamless integration with AI services.
 
-There are several ways of editing your application.
+## Features
 
-**Use Lovable**
+- 🤖 AI-powered chat conversations
+- 🎤 Voice message recording and transcription
+- 🔐 Secure user authentication with Supabase
+- 💬 Real-time messaging interface
+- 📱 Responsive design for desktop and mobile
+- 🎨 Modern UI with dark/light mode support
 
-Simply visit the Lovable Project
+## Getting Started
 
-Changes made via Lovable will be committed automatically to this repo.
+### Prerequisites
 
-**Use your preferred IDE**
+- Node.js (v18 or higher)
+- npm or yarn package manager
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Installation
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
+1. Clone the repository:
+```bash
 git clone <YOUR_GIT_URL>
+cd sentinela
+```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+2. Install dependencies:
+```bash
+npm install
+```
 
-# Step 3: Install the necessary dependencies.
-npm i
+3. Set up environment variables:
+```bash
+cp .env.example .env
+```
+Fill in your Supabase credentials and other required environment variables.
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+4. Start the development server:
+```bash
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+The application will be available at `http://localhost:8080`
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Building for Production
 
-**Use GitHub Codespaces**
+```bash
+npm run build
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Technology Stack
 
-## What technologies are used for this project?
+- **Frontend Framework**: React 18 with TypeScript
+- **Build Tool**: Vite
+- **Styling**: Tailwind CSS with shadcn/ui components
+- **Backend**: Supabase (Authentication, Database, Real-time)
+- **State Management**: React Context API
+- **Routing**: React Router DOM
+- **Audio Processing**: Web Audio API for voice recordings
 
-This project is built with:
+## Project Structure
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+```
+src/
+├── components/          # Reusable UI components
+├── contexts/           # React context providers
+├── hooks/              # Custom React hooks
+├── integrations/       # Third-party service integrations
+├── lib/                # Utility functions
+├── pages/              # Page components
+└── main.tsx           # Application entry point
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit your changes: `git commit -m 'Add amazing feature'`
+4. Push to the branch: `git push origin feature/amazing-feature`
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License.
