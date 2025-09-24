@@ -71,6 +71,21 @@ SESSIONS_LAST_SEEN = {}               # sid -> epoch seconds
 METRICS_STARTED_AT = time.time()
 ACTIVE_WINDOW_SECONDS = int(os.environ.get("ACTIVE_WINDOW_SECONDS", "300"))  # 5 min
 
+def _extract_eq_pairs(text: str) -> dict:
+    """
+    Varre pares do tipo COL=VAL no texto (com ou sem aspas) e devolve em formato where {COL__eq: VAL}.
+    Ex.: 'LOJA=017 e SKU="999"' -> {"LOJA__eq": "017", "SKU__eq": "999"}
+    """
+    out = {}
+    if not text:
+        return out
+    for m in re.finditer(r'\b([A-Za-z0-9_]+)\s*=\s*("([^"]+)"|\'([^\']+)\'|([^\s,;]+))', text):
+        col = m.group(1)
+        val = m.group(3) or m.group(4) or m.group(5)
+        if val is not None:
+            out[f"{col}__eq"] = val
+    return out
+
 def _extract_client_id(request):
     # tenta header setado pelo front (recomendado), senão X-Forwarded-For (ngrok/proxy), senão IP
     sid = request.headers.get("x-client-id")
@@ -354,7 +369,7 @@ def head_csv_fn(filename: str, n: int = 5):
     except Exception as e:
         return {"status": "error", "message": f"{type(e).__name__}: {e}"}
 
-ALLOWED_TOOLS = {"sql_head", "sql_filter", "sql_aggregate", "sku_intersection", "head_csv", "list_csvs","none"}
+ALLOWED_TOOLS = {"sql_head", "sql_filter", "sql_aggregate", "sku_intersection", "head_csv", "list_csvs","none", "sql_count"}
 TOOL_ALIASES = {
     "head": "sql_head",
     "sample": "sql_head",
@@ -375,6 +390,11 @@ TOOL_ALIASES = {
 
     "sku_intersect": "sku_intersection",
     "sku_overlap": "sku_intersection",
+    "count": "sql_count",
+    "contar": "sql_count",
+    "conte": "sql_count",
+    "quantas_vezes": "sql_count",
+    "ocorrencias": "sql_count",
 }
 
 class Plan(BaseModel):
@@ -878,7 +898,8 @@ def _planner_prompt(user_msg: str) -> str:
         "Você é um PLANEJADOR. Retorne SOMENTE JSON válido com este formato:\n"
         "{"
         "  \"mode\": \"tool|answer|delegate\","
-        "  \"tool\": \"sql_head|sql_filter|sql_aggregate|sku_intersection|list_csvs|null\","
+        "  \"tool\": \"sql_head|sql_filter|sql_aggregate|sku_intersection|sql_count|list_csvs|null\","
+
         "  \"params\": { ... },"
         "  \"rewrite\": \"mensagem reescrita para o agente responder sem consultar DB\","
         "  \"confidence\": 0.0"
@@ -1048,6 +1069,29 @@ def _sanitize_plan(plan: Plan, user_msg: str) -> tuple[Plan, Optional[str]]:
         if p.get("loja") is None or not p.get("start") or not p.get("end"):
             return Plan(mode=plan.mode, tool=tool, params=p,
                         rewrite=plan.rewrite, confidence=plan.confidence), "sem_parametros"
+    elif tool == "sql_count":
+        if not p.get("table"):
+            t = _infer_table(user_msg, None)
+            if t: p["table"] = t
+
+        # where do planner + pares COL=VAL do texto (se o planner não tiver populado)
+        where = dict(p.get("where") or {})
+        where.update(_extract_eq_pairs(user_msg))
+
+        # loja e período inferidos
+        loja_num = _extract_loja_from_text(user_msg)
+        if loja_num is not None and "loja__eq" not in where and "store__eq" not in where and "filial__eq" not in where:
+            where["loja__eq"] = loja_num
+        start, end = _extract_time_range_pt(user_msg, p.get("table"))
+        if start and end and "date__date_between" not in where:
+            where["date__date_between"] = [start, end]
+
+        p["where"] = where
+
+        # precisa ao menos da tabela + 1 filtro para ser útil
+        if not p.get("table") or not where:
+            return Plan(mode=plan.mode, tool=tool, params=p,
+                        rewrite=plan.rewrite, confidence=plan.confidence), "sem_parametros"
 
     elif tool == "list_csvs":
         pass
@@ -1115,6 +1159,37 @@ def _answer_outside_tools(msg: str) -> str:
 # =========================
 # SQL tools (consultas)
 # =========================
+
+def sql_count_fn(table: str, where: dict | None = None):
+    """
+    Conta linhas em uma tabela aplicando filtros (where) arbitrários.
+    where usa os mesmos operadores do sql_filter_fn (_build_where).
+    Ex.: {"LOJA__eq": "333"} ou {"TIPOMOVIMENTACAO__eq": "Saída", "date__date_between":["2025-01-01","2025-06-30"]}
+    """
+    if not _table_exists(table):
+        return {"status": "error", "message": f"Tabela não encontrada: {table}"}
+    where = where or {}
+    try:
+        where_sql, params = _build_where(table, where)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    q = f'SELECT COUNT(*) AS total FROM "{table}"'
+    if where_sql:
+        q += f" WHERE {where_sql}"
+    rows = _sqlite_exec(q, params)
+    total = int(rows[0]["total"]) if rows else 0
+
+    # envelope + html simples (caso alguém chame direto)
+    return _envelope(
+        True,
+        answer_type="html",
+        data=[{"total": total}],
+        stats={"total": total, "plan": "count"},
+        diagnostics={"table": table, "where": where},
+        html_str=f"<p><b>Total:</b> {total}</p>",
+    )
+
 def sql_head_fn(table: str, n: int = 5):
     if not _table_exists(table):
         return {"status": "error", "message": f"Tabela não encontrada: {table}"}
@@ -1201,10 +1276,37 @@ def _guess_cols(table: str):
     return {"sku": sku, "loja": loja, "data": data, "all": cols}
 
 def _date_expr_auto(col: str) -> str:
+    # remove horário se existir
+    base = f'(CASE WHEN instr("{col}", " ")>0 THEN substr("{col}",1,instr("{col}"," ")-1) ELSE "{col}" END)'
+    # posição do '-' em YYYY-MM-DD
+    iso_check = f"(instr({base}, '-')=5)"
+    # montar aaaa-mm-dd a partir de d/m/aaaa (1 ou 2 dígitos)
+    # p1 = primeira '/', p2 = segunda '/'
+    # dia = substr(base, 1, p1-1)
+    # mes = substr(base, p1+1, p2-p1-1)
+    # ano = substr(base, p2+1, 4)
+    y_from_slash = (
+        f"substr({base}, "
+        f"       instr({base},'/') + instr(substr({base}, instr({base},'/')+1), '/') + 1, 4)"
+    )
+    m_from_slash = (
+        f"substr({base}, "
+        f"       instr({base},'/')+1, "
+        f"       instr(substr({base}, instr({base},'/')+1), '/')-1)"
+    )
+    d_from_slash = f"substr({base}, 1, instr({base},'/')-1)"
+    dmy_flex = (
+        f"printf('%04d-%02d-%02d', "
+        f"       CAST({y_from_slash} AS INT), "
+        f"       CAST({m_from_slash} AS INT), "
+        f"       CAST({d_from_slash} AS INT))"
+    )
     return (
-        f"CASE WHEN instr(\"{col}\", '-')=5 "
-        f"THEN substr(\"{col}\",1,10) "
-        f"ELSE substr(\"{col}\",7,4)||'-'||substr(\"{col}\",4,2)||'-'||substr(\"{col}\",1,2) END"
+        f"(CASE "
+        f"   WHEN {iso_check} THEN substr({base},1,10) "
+        f"   WHEN instr({base},'/')>0 THEN {dmy_flex} "
+        f"   ELSE {base} "
+        f" END)"
     )
 
 def sku_intersection_fn(
@@ -1433,6 +1535,24 @@ def sql_filter_fn(table: str, where: dict | None = None, limit: int = 100,
     q += " LIMIT ? OFFSET ?"
 
     rows = _sqlite_exec(q, params + [max(1, int(limit)), max(0, int(offset))])
+    if not rows and where:
+        # testa cada condição isoladamente para apontar a "culpada"
+        diag = {}
+        for k,v in where.items():
+            try:
+                ws, ps = _build_where(table, {k:v})
+                cnt = _sqlite_exec(f'SELECT COUNT(*) AS c FROM "{table}" WHERE {ws}', ps)[0]["c"]
+                diag[k] = cnt
+            except Exception as e:
+                diag[k] = f"erro: {e}"
+        return _envelope(
+            True,
+            answer_type="html",
+            data=[],
+            stats={"rows_returned": 0, "plan": "filter"},
+            diagnostics={"table": table, "where": where, "isolated_counts": diag},
+            html_str="<div class='muted'>Sem resultados para os filtros aplicados.</div>"
+        )
 
     return _envelope(
         True,
@@ -1442,7 +1562,7 @@ def sql_filter_fn(table: str, where: dict | None = None, limit: int = 100,
         diagnostics={"table": table, "where": where, "order_by": ob_col, "order": ord_kw},
         html_str=_rows_to_html(rows),
     )
-
+    
 @app.get("/tool/sql_filter")
 def call_sql_filter(
     table: str = Query(...),
@@ -1532,6 +1652,11 @@ sql_filter_tool = tool(
     description="Filtra linhas no SQLite com operadores: eq, ne, gt, gte, lt, lte, in, contains, icontains."
 )(sql_filter_fn)
 
+sql_count_tool = tool(
+    name="sql_count",
+    description="Conta linhas em uma tabela do SQLite aplicando filtros (where)."
+)(sql_count_fn)
+
 def _envelope(ok: bool, *, answer_type="html", message=None, data=None, stats=None, diagnostics=None, html_str=None):
     return {
         "ok": bool(ok),
@@ -1607,6 +1732,43 @@ def _execute_plan_to_html(plan: Plan) -> str:
             f"<h3>Agregação em <code>{html.escape(table)}</code></h3>"
             + to_html_rows(sql_aggregate_fn(table, by, value, op, top, date_col, start, end), "sql_aggregate")
         )
+    if t == "sql_count":
+        table = p.get("table")
+        where = p.get("where") or {}
+        res = sql_count_fn(table, where)
+
+        # tenta montar uma frase do tipo "COL = VAL aparece X vezes ..."
+        total = (res.get("stats") or {}).get("total")
+        if total is None:
+            try:
+                total = int((res.get("data") or [{}])[0].get("total", 0))
+            except:
+                total = 0
+
+        # identifica um "COL = VAL" principal (se houver)
+        eqs = []
+        for k, v in where.items():
+            if "__" in k:
+                col, op = k.split("__", 1)
+            else:
+                col, op = k, "eq"
+            if op == "eq" and k.lower() not in {"date__date_between"}:
+                eqs.append((col, v))
+
+        loja = where.get("loja__eq") or where.get("store__eq") or where.get("filial__eq")
+        rng = where.get("date__date_between")
+
+        if eqs:
+            col, val = eqs[0]
+            frase = f'{col} = {val} aparece {total} vezes em {table}'
+            if loja is not None:
+                frase += f' na loja {str(loja).lstrip("0") or "0"}'
+            if isinstance(rng, (list, tuple)) and len(rng) == 2:
+                frase += f' entre {rng[0]} e {rng[1]}'
+            return f"<h3>Contagem</h3><p>{html.escape(frase)}</p>"
+
+        # fallback genérico
+        return f"<h3>Contagem</h3><p>Total de linhas que atendem aos filtros: <b>{total}</b></p>"
 
     if t == "sku_intersection":
         res = sku_intersection_fn(
@@ -1709,37 +1871,46 @@ def fastpath_markdown(msg: str) -> str | None:
         rows = res.get("rows") or []
         html_table = _rows_to_html(rows)
         return f"<h3>Amostra de <code>{html.escape(table)}</code></h3>{html_table}"
-    m = re.search(r"filtr(a|e)\s+(.+?)\s+em\s+([A-Za-z0-9_\.]+)(?:.*?(?:até|limite)\s+(\d+))?", msg, re.I)
+    m = re.search(
+        r"filtr(a|e)(?:\s+(.+?))?\s+em\s+([A-Za-z0-9_\.]+)(?:.*?(?:até|limite)\s+(\d+))?",
+        msg, re.I
+         )
     if m:
-        conds_str, table, limit_s = m.group(2), m.group(3), m.group(4)
-        if not table.lower().endswith(".csv"):
-            chosen = table if _table_exists(table) else resolve_table_from_text(
-                msg,
-                required_tags={"date","store","sku"} if "sku" in msg.lower() else None
-            )
-            if chosen and _table_exists(chosen):
-                table = chosen
-            else:
-                return "<div class='muted'>Não reconheci a tabela citada. Use um nome próximo do arquivo ou faça upload em /docs.</div>"
-
-        parts = re.split(r"\s*(?:,| e )\s*", conds_str, flags=re.I)
+        conds_str = (m.group(2) or "").strip()
+        table = m.group(3)
+        limit_s = m.group(4)
+        # ... (o restante do bloco fica igual, mas acrescente estes parsers:)
         where = {}
-        for p in parts:
-            op = None
+
+        # 1) lista 'IN'
+        for p in re.split(r"\s*(?:,| e )\s*", conds_str, flags=re.I):
+            if not p: 
+                continue
+            if re.search(r"\bin\b", p, re.I):
+                left, right = re.split(r"\bin\b", p, flags=re.I, maxsplit=1)
+                col = left.strip()
+                seq = [x.strip() for x in re.split(r"[,\s]+", right) if x.strip()]
+                if seq:
+                    where[f"{col}__in"] = seq
+                continue
+            # operadores clássicos (=, !=, >=, <=, >, <)
             for sym, tag in [(">=","gte"),("<=","lte"),("!=","ne"),(">","gt"),("<","lt"),("=","eq")]:
                 if sym in p:
                     left, right = p.split(sym, 1)
-                    op = tag
                     col = left.strip()
                     val = right.strip().strip('"\'')
-                    if op in {"gt","gte","lt","lte"}:
-                        try:
-                            val = float(val.replace(",", "."))
-                        except:
-                            pass
-                    key = f"{col}__{op}" if op != "eq" else col
+                    if tag in {"gt","gte","lt","lte"}:
+                        try: val = float(val.replace(",", ".")) 
+                        except: pass
+                    key = f"{col}__{tag}" if tag!="eq" else col
                     where[key] = val
                     break
+
+        # 2) intervalo de datas em linguagem natural, mesmo se não vier em 'conds_str'
+        if re.search(r"\bentre\s+.+\s+e\s+.+", msg, re.I):
+            s, e = _extract_time_range_pt(msg, table)
+            if s and e:
+                where["date__date_between"] = [s, e]
 
         lim = int(limit_s) if limit_s else 100
         res = sql_filter_fn(table, where, lim)
