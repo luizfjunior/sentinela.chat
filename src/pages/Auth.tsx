@@ -7,16 +7,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 const Auth = () => {
   const {
     user,
     signIn,
     signUp,
+    resetPassword,
     loading
   } = useAuth();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [showResetDialog, setShowResetDialog] = useState(false);
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -64,6 +68,20 @@ const Auth = () => {
     setIsLoading(false);
     if (!error) {
       // User will be redirected after email confirmation
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail) return;
+    
+    setIsLoading(true);
+    const { error } = await resetPassword(resetEmail);
+    setIsLoading(false);
+    
+    if (!error) {
+      setShowResetDialog(false);
+      setResetEmail('');
     }
   };
 
@@ -138,6 +156,39 @@ const Auth = () => {
                   <Button type="submit" disabled={isLoading} className="w-full bg-[#873131]">
                     {isLoading ? 'Entrando...' : 'Entrar'}
                   </Button>
+                  
+                  <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
+                    <DialogTrigger asChild>
+                      <Button type="button" variant="link" className="w-full text-zinc-400 hover:text-white">
+                        Esqueceu sua senha?
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="bg-zinc-800 border-zinc-700">
+                      <DialogHeader>
+                        <DialogTitle className="text-white">Recuperar Senha</DialogTitle>
+                        <DialogDescription className="text-zinc-400">
+                          Digite seu email para receber o link de recuperação
+                        </DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handleResetPassword} className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="reset-email" className="text-white">Email</Label>
+                          <Input
+                            id="reset-email"
+                            type="email"
+                            placeholder="seu@email.com"
+                            value={resetEmail}
+                            onChange={(e) => setResetEmail(e.target.value)}
+                            className="bg-zinc-700 border-zinc-600 text-white placeholder:text-zinc-400"
+                            required
+                          />
+                        </div>
+                        <Button type="submit" disabled={isLoading} className="w-full bg-[#873131]">
+                          {isLoading ? 'Enviando...' : 'Enviar Link de Recuperação'}
+                        </Button>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
                 </form>
               </TabsContent>
 
