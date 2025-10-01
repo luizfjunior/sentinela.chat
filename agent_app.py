@@ -28,7 +28,7 @@ import markdown
 # =========================
 # App & rotas básicas
 # =========================
-app = FastAPI(title="Sentinela (mínimo)")
+app = FastAPI(title="Sentinela")
 
 @app.get("/status")
 def status():
@@ -425,6 +425,22 @@ def call_list_csvs():
 # =========================
 # SQLite helpers + upload
 # =========================
+def _unaccent_sql(expr: str) -> str:
+    # remove alguns acentos comuns (minúsc/maiúsc). adicione mais se precisar.
+    repl = [
+        ("á","a"),("à","a"),("â","a"),("ã","a"),("ä","a"),
+        ("Á","A"),("À","A"),("Â","A"),("Ã","A"),("Ä","A"),
+        ("é","e"),("ê","e"),("É","E"),("Ê","E"),
+        ("í","i"),("ï","i"),("Í","I"),("Ï","I"),
+        ("ó","o"),("ô","o"),("õ","o"),("ö","o"),("Ó","O"),("Ô","O"),("Õ","O"),("Ö","O"),
+        ("ú","u"),("ü","u"),("Ú","U"),("Ü","U"),
+        ("ç","c"),("Ç","C"),
+    ]
+    for a,b in repl:
+        expr = f"replace({expr}, '{a}', '{b}')"
+    return expr
+
+
 def _sqlite_exec(q: str, params: list | tuple = ()):
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
@@ -464,7 +480,7 @@ def _sniff_sep(file_path: str) -> str:
         first = ""
     candidates = [";", ",", "\t", "|"]
     counts = {s: first.count(s) for s in candidates}
-    sep = max(counts, key=count्स.get) if any(counts.values()) else ";"
+    sep = max(counts, key=counts.get) if any(counts.values()) else ";"
     return sep
 
 def _import_csv_to_sqlite(temp_csv_path: str, table: str) -> dict:
@@ -985,6 +1001,9 @@ def _sanitize_plan(plan: Plan, user_msg: str) -> tuple[Plan, Optional[str]]:
     reason = None
     tool = plan.tool
 
+    if plan.tool in {"null"}:
+        plan.tool = "none"
+
     if plan.mode != "tool":
         return Plan(mode=plan.mode, tool=plan.tool, params=p,
                     rewrite=plan.rewrite, confidence=plan.confidence), "delegate"
@@ -1343,14 +1362,6 @@ def sku_intersection_fn(
         a_where_all["loja__eq"] = str(loja)
         d_where_all["loja__eq"] = str(loja)
 
-    if start and end:
-        a_date_col = _key_to_col(ajustes, "date", a_meta) or a_meta.get("data")
-        d_date_col = _key_to_col(devol,   "date", d_meta)  or d_meta.get("data")
-        if a_date_col:
-            a_where_all[f'{a_date_col}__date_between'] = [start, end]
-        if d_date_col:
-            d_where_all[f'{d_date_col}__date_between'] = [start, end]
-
     if where_a: a_where_all.update(where_a)
     if where_d: d_where_all.update(where_d)
 
@@ -1469,6 +1480,15 @@ def _build_where(table: str, where: dict) -> tuple[str, list]:
                 except: pass
             clauses.append(f"{cast} {sym} ?"); params.append(val)
 
+        elif op == "icontains":
+            # normaliza o valor de busca para minúsculas
+            val_norm = str(val).lower()
+            # citação da coluna sem f-string aninhada
+            col_quoted = f'"{col}"'
+            col_norm = f"lower({col_quoted})"
+            clauses.append(f"{col_norm} LIKE ?")
+            params.append(f"%{val_norm}%")
+
         elif op == "between":
             if not isinstance(val, (list, tuple)) or len(val) != 2:
                 raise ValueError(f"between espera [low, high] em {key}")
@@ -1492,9 +1512,6 @@ def _build_where(table: str, where: dict) -> tuple[str, list]:
         elif op == "contains":
             clauses.append(f'"{col}" LIKE ?'); params.append(f"%{val}%")
 
-        elif op == "icontains":
-            clauses.append(f'LOWER("{col}") LIKE ?'); params.append(f"%{str(val).lower()}%")
-
         elif op == "in":
             seq = list(val) if isinstance(val, (list, tuple, set)) else []
             if not seq:
@@ -1509,6 +1526,7 @@ def _build_where(table: str, where: dict) -> tuple[str, list]:
                 clauses.append(f'"{col}" IN ({ph})'); params.extend(list(seq))
         else:
             raise ValueError(f"Operador não suportado: {op}")
+        
 
     where_sql = " AND ".join(clauses) if clauses else ""
     return where_sql, params
@@ -1990,13 +2008,13 @@ def chat(in_: ChatIn, response: Response):
 
         if mode == "tool" and payload:
             _set_resp_headers(response, provider="free-or-primary", model_id="planner", path="planner->tool")
-            return {"answer": payload}
+            # payload já vem como HTML; envolva numa div para manter o padrão da UI:
+            return f"<div class='reply'>{payload}</div>"
 
         if mode == "delegate_outside" and SEMANTIC_FALLBACK:
             out = _answer_outside_tools(msg)
             _set_resp_headers(response, provider="primary", model_id=PRIMARY_MODEL, path="planner->outside")
-            return {"answer": render_md(out)}
-
+            return f"<div class='reply'>{render_md(out)}</div>"
         # 4) agente principal com roteamento + fallback
         provider, model_id = _route_model(msg)
         if forced == "free" and FREE_MODEL_ID:
@@ -2021,7 +2039,7 @@ def chat(in_: ChatIn, response: Response):
 
 @app.get("/chat_html", response_class=HTMLResponse)
 @app.post("/chat_html", response_class=HTMLResponse)
-def chat_html(message: str = None, in_: ChatIn = None, response: Response = None):
+def chat_html(message: str | None = None, in_: ChatIn | None = None, response:Response = None):
     raw = (message or (in_.message if in_ else "") or "").strip()
     forced, msg = _extract_forced_provider(raw)
 
