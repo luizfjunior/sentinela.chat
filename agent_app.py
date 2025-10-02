@@ -1,3 +1,7 @@
+# agent_app.py
+# Sentinela – Chat + Tools (SQLite/CSV) com planner, roteamento e UI
+# Requisitos principais: fastapi, uvicorn, agno, pydantic, pandas, numpy, markdown, starlette
+
 import os, traceback
 from typing import Any, Dict, Optional, Literal
 import numpy as np
@@ -24,19 +28,10 @@ from agno.tools import tool
 import sqlite3, tempfile, shutil, pathlib
 import markdown
 
-
 # =========================
 # App & rotas básicas
 # =========================
 app = FastAPI(title="Sentinela")
-
-@app.get("/status")
-def status():
-    return {"status": "up"}
-
-@app.get("/ping")
-def ping():
-    return {"ok": True}
 
 def _missing_key_banner() -> str:
     return (
@@ -46,24 +41,32 @@ def _missing_key_banner() -> str:
         "  Defina a variável no terminal OU use o launcher recomendado:\n\n"
         "    Windows PowerShell:\n"
         '      $env:OPENAI_API_KEY = "SUA_CHAVE_AQUI"\n'
-        "      python serve.py --host 0.0.0.0 --port 8000 --reload\n\n"
+        "      python server.py --host 0.0.0.0 --port 8000 --reload\n\n"
         "    Linux/macOS:\n"
         '      export OPENAI_API_KEY=\"SUA_CHAVE_AQUI\"\n'
-        "      python serve.py --host 0.0.0.0 --port 8000 --reload\n\n"
+        "      python server.py --host 0.0.0.0 --port 8000 --reload\n\n"
         "  Links após iniciar:\n"
         "    • UI (Chat):   http://<host>:<port>/\n"
         "    • Swagger:     http://<host>:<port>/docs\n"
         "============================================================\n"
     )
 
+@app.get("/status")
+def status():
+    return {"status": "up"}
+
+@app.get("/ping")
+def ping():
+    return {"ok": True}
+
 @asynccontextmanager
 async def app_lifespan(app):
     # STARTUP
     if not os.environ.get("OPENAI_API_KEY"):
         print(_missing_key_banner(), flush=True)
-        # aborta o start pra ficar claro
         raise RuntimeError("OPENAI_API_KEY ausente")
     yield
+
 app.router.lifespan_context = app_lifespan
 
 ACTIVE_REQUESTS = 0                   # requisições sendo atendidas agora
@@ -71,23 +74,7 @@ SESSIONS_LAST_SEEN = {}               # sid -> epoch seconds
 METRICS_STARTED_AT = time.time()
 ACTIVE_WINDOW_SECONDS = int(os.environ.get("ACTIVE_WINDOW_SECONDS", "300"))  # 5 min
 
-def _extract_eq_pairs(text: str) -> dict:
-    """
-    Varre pares do tipo COL=VAL no texto (com ou sem aspas) e devolve em formato where {COL__eq: VAL}.
-    Ex.: 'LOJA=017 e SKU="999"' -> {"LOJA__eq": "017", "SKU__eq": "999"}
-    """
-    out = {}
-    if not text:
-        return out
-    for m in re.finditer(r'\b([A-Za-z0-9_]+)\s*=\s*("([^"]+)"|\'([^\']+)\'|([^\s,;]+))', text):
-        col = m.group(1)
-        val = m.group(3) or m.group(4) or m.group(5)
-        if val is not None:
-            out[f"{col}__eq"] = val
-    return out
-
 def _extract_client_id(request):
-    # tenta header setado pelo front (recomendado), senão X-Forwarded-For (ngrok/proxy), senão IP
     sid = request.headers.get("x-client-id")
     if not sid:
         fwd = request.headers.get("x-forwarded-for")
@@ -149,17 +136,18 @@ def free_health():
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-
 # =========================
 # Constantes
 # =========================
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 DB_PATH  = os.path.join(DATA_DIR, "sentinela.db")
 USE_PLANNER = True
-
+OUTSIDE_AUTOEXEC = os.environ.get("OUTSIDE_AUTOEXEC", "on").lower() in {"on","1","true","yes"}
+RUN_OPEN = "[[RUN]]"
+RUN_CLOSE = "[[/RUN]]"
 # ===== Fallback fora de tools =====
 SEMANTIC_FALLBACK = os.environ.get("SEMANTIC_FALLBACK", "on").lower() in {"on","1","true","yes"}
-OUT_OF_TOOL_MAXTOKENS = int(os.environ.get("OUT_OF_TOOL_MAXTOKENS", "1400"))
+OUT_OF_TOOL_MAXTOKENS = int(os.environ.get("OUT_OF_TOOL_MAXTOKENS", "5000"))
 
 # ===== Model routing (planner barato + fallback) =====
 PRIMARY_MODEL = os.environ.get("PRIMARY_MODEL", "gpt-4o-mini").strip()
@@ -308,7 +296,6 @@ def _extract_loja_from_text(text: str) -> Optional[int]:
         return int(m2.group(1))
     return None
 
-
 # =========================
 # CSV (legacy) - funções + endpoints
 # =========================
@@ -421,7 +408,6 @@ def list_csvs_fn():
 def call_list_csvs():
     return list_csvs_fn()
 
-
 # =========================
 # SQLite helpers + upload
 # =========================
@@ -439,7 +425,6 @@ def _unaccent_sql(expr: str) -> str:
     for a,b in repl:
         expr = f"replace({expr}, '{a}', '{b}')"
     return expr
-
 
 def _sqlite_exec(q: str, params: list | tuple = ()):
     con = sqlite3.connect(DB_PATH)
@@ -508,6 +493,7 @@ def _import_csv_to_sqlite(temp_csv_path: str, table: str) -> dict:
 
         last_err = None
         for sep in [primary_sep, ";", ",", "\t", "|"]:
+
             if sep in tried:
                 continue
             tried.add(sep)
@@ -597,7 +583,6 @@ def call_ingest_all(recursive: bool = Query(False, description="Se true, percorr
     rebuild_catalog()
     return res
 
-
 # --- normalização / tokenização leves ---
 _PT_STOP = {"de","da","do","das","dos","e","em","no","na","nos","nas","com","por","para","a","o","os","as","por","entre"}
 
@@ -615,10 +600,24 @@ _SYNONYMS = {
     "usuario": {"usuario","vendedor","idusuario","operador"},
     "categoria": {"categoria","grupo","subgrupo","departamento","segmento","familia"},
     "marca": {"marca","brand"},
-    "data": {"data","dt","datacancelamento","datadev","data_devolucao","datavenda","dt_mov","dtmov","dtmovto"},
+    "data": {"data","dt","datacancelamento","data_devolucao","datadev","data_devolucoes","datavenda","dt_mov","dtmov","dtmovto"},
     "valor": {"valor","valorbruto","preco","preço","total","subtotal","receita","faturamento","amount"},
     "quantidade": {"qtd","qtde","quantidade","qte","qtdade"},
 }
+
+def _strip_accents(s:str)->str:
+    return ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c))
+
+def _norm_text(s:str)->str:
+    return re.sub(r'[^a-z0-9]+',' ', _strip_accents(s.lower())).strip()
+
+def _tokens(s:str)->set[str]:
+    toks = {t for t in _norm_text(s).split() if t and t not in _PT_STOP}
+    expanded = set(toks)
+    for base, syns in _SYNONYMS.items():
+        if base in toks or (toks & syns):
+            expanded |= syns | {base}
+    return expanded
 
 def _tag_of_column(col: str)->set[str]:
     c = _norm_text(col)
@@ -652,19 +651,8 @@ def _tags_from_tokens(tokens: set[str]) -> set[str]:
         if tokens & _SYNONYMS.get(k, set()): tags.add(t)
     return tags
 
-def _strip_accents(s:str)->str:
-    return ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c))
-
-def _norm_text(s:str)->str:
-    return re.sub(r'[^a-z0-9]+',' ', _strip_accents(s.lower())).strip()
-
-def _tokens(s:str)->set[str]:
-    toks = {t for t in _norm_text(s).split() if t and t not in _PT_STOP}
-    expanded = set(toks)
-    for base, syns in _SYNONYMS.items():
-        if base in toks or (toks & syns):
-            expanded |= syns | {base}
-    return expanded
+# catálogo global (evita NameError se usado antes de rebuild)
+CATALOG: dict = {}
 
 def rebuild_catalog():
     global CATALOG
@@ -1047,9 +1035,46 @@ def _sanitize_plan(plan: Plan, user_msg: str) -> tuple[Plan, Optional[str]]:
             if t: p["table"] = t
         table = p.get("table")
 
+        toks = _tokens(user_msg)
+        want_user = bool(toks & _SYNONYMS.get("usuario", set()))
+        want_prod = bool(toks & _SYNONYMS.get("sku", set()) or re.search(r"\bprodut", user_msg, re.I))
+        want_same_day = bool(re.search(r"\bmesm[oa]\s+dia\b", user_msg, re.I))
+
+        # BY
         if not p.get("by") and table:
-            by = _infer_by(table, toks)
-            if by: p["by"] = by
+            meta = _guess_cols(table)
+            by_candidates = []
+            if want_user:
+                u = _first_col_with_tag(table, "user")
+                if u: by_candidates.append(u)
+            if want_prod:
+                s = _first_col_with_tag(table, "sku")
+                if s: by_candidates.append(s)
+
+            # caso "mesmo dia": SKU + DATA
+            if want_same_day and meta.get("data"):
+                if not by_candidates:
+                    s = _first_col_with_tag(table, "sku")
+                    if s: by_candidates.append(s)
+                by_candidates.append(meta["data"])
+
+            if by_candidates:
+                p["by"] = by_candidates if len(by_candidates) > 1 else by_candidates[0]
+            else:
+                by = _infer_by(table, toks)
+                if by: p["by"] = by
+
+        # OP / VALUE (frequência vs volume)
+        txt = user_msg.lower()
+        if ("volume" in txt) and (table) and (not p.get("value")):
+            v = _first_col_with_tag(table, "amount")
+            if v:
+                p["op"] = "sum"
+                p["value"] = v
+
+        if ("frequência" in txt or "frequencia" in txt):
+            p["op"] = "count"
+            p.pop("value", None)
 
         if not p.get("op") or (p.get("op") != "count" and not p.get("value")):
             if table:
@@ -1088,16 +1113,15 @@ def _sanitize_plan(plan: Plan, user_msg: str) -> tuple[Plan, Optional[str]]:
         if p.get("loja") is None or not p.get("start") or not p.get("end"):
             return Plan(mode=plan.mode, tool=tool, params=p,
                         rewrite=plan.rewrite, confidence=plan.confidence), "sem_parametros"
+
     elif tool == "sql_count":
         if not p.get("table"):
             t = _infer_table(user_msg, None)
             if t: p["table"] = t
 
-        # where do planner + pares COL=VAL do texto (se o planner não tiver populado)
         where = dict(p.get("where") or {})
         where.update(_extract_eq_pairs(user_msg))
 
-        # loja e período inferidos
         loja_num = _extract_loja_from_text(user_msg)
         if loja_num is not None and "loja__eq" not in where and "store__eq" not in where and "filial__eq" not in where:
             where["loja__eq"] = loja_num
@@ -1107,7 +1131,6 @@ def _sanitize_plan(plan: Plan, user_msg: str) -> tuple[Plan, Optional[str]]:
 
         p["where"] = where
 
-        # precisa ao menos da tabela + 1 filtro para ser útil
         if not p.get("table") or not where:
             return Plan(mode=plan.mode, tool=tool, params=p,
                         rewrite=plan.rewrite, confidence=plan.confidence), "sem_parametros"
@@ -1138,42 +1161,86 @@ _NEEDS_DATA_RE = re.compile(
     r"\b(top|soma|sum|conta|count|m[eé]dia|avg|min|max|total|quant|quanto|"
     r"valor|pre[çc]o|vendas?|entre\s+\d{4}|\d{4}\-\d{2}\-\d{2})\b", re.I)
 
+OUTSIDE_AUTOEXEC = os.environ.get("OUTSIDE_AUTOEXEC", "on").lower() in {"on","1","true","yes"}
+
+RUN_TAG_RE = re.compile(r"\[\[RUN\]\](.+?)\[\[/RUN\]\]", re.S | re.I)
+
+def _extract_run_commands(text: str) -> list[str]:
+    if not text:
+        return []
+    cmds = [re.sub(r"\s+", " ", m.strip()) for m in RUN_TAG_RE.findall(text)]
+    return [c for c in cmds if c]
+
 def _looks_like_data_question(msg: str) -> bool:
     return bool(_NEEDS_DATA_RE.search(msg or ""))
 
 def _answer_outside_tools(msg: str) -> str:
+    # modelo principal com teto maior de tokens
     big_model = _make_model(PRIMARY_MODEL, "primary")
     try:
         big_model.max_tokens = OUT_OF_TOOL_MAXTOKENS
     except Exception:
         pass
 
-    tmp_agent = Agent(
-        name="explainer",
-        model=big_model,
-        system_message=(
-            "Você deve responder SEM usar ferramentas.\n"
-            "Se a pergunta for conceitual, responda de forma clara e objetiva.\n"
-            "Se for pedindo números/base de dados (contar, somar, filtrar, agrupar, período, top-N), "
-            "NÃO invente valores. Explique exatamente o que seria consultado e sugira um comando que o usuário pode fazer, "
-            "como: 'mostre <tabela> com 5 linhas', 'agregue em <tabela> por <coluna> somando <valor> top 10', "
-            "ou 'filtre ... em <tabela>'. "
-            "Nunca gere SQL; nunca mostre trechos SELECT/WHERE/etc. Use apenas linguagem natural nesses exemplos."
-        ),
+    # catálogo resumido para o modelo não inventar tabela/coluna
+    schema = _mini_schema_for_prompt(msg)
+
+    system = (
+        "Você é um ANALISTA & SOLUCIONADOR do Sentinela.\n"
+        "Regras:\n"
+        "1) Se a pergunta for conceitual, responda de forma clara e objetiva.\n"
+        "2) Se exigir dados (contar/somar/filtrar/agrupar/período), NÃO invente números.\n"
+        "   Em vez disso, proponha EXATAMENTE UM comando válido do Sentinela, "
+        "   dentro das tags [[RUN]] ... [[/RUN]]. Sem explicações DENTRO das tags.\n"
+        "   Exemplos válidos: \n"
+        "     [[RUN]]mostre cancelamento_2025 com 5 linhas[[/RUN]]\n"
+        "     [[RUN]]filtre LOJA=017 e SKU=999999992513081 em inventario_saida_042025 limite 20[[/RUN]]\n"
+        "     [[RUN]]agregue em devolucao por SKU somando VALORBRUTO entre 2025-01-01 e 2025-06-30 top 20[[/RUN]]\n"
+        "3) Depois das tags, explique brevemente o que o comando faz e como interpretar o resultado.\n"
+        "4) Considere problemas de codificação/acentos (ex.: 'Sa?a' vs 'Saída'); quando filtrar texto, prefira icontains.\n"
+        "5) Use TABELAS e COLUNAS somente do catálogo a seguir (não invente nomes).\n"
+        f"Catálogo enxuto: {json.dumps(schema, ensure_ascii=False)}\n"
     )
 
-    prompt = msg
+    # se for claramente “pergunta de dados”, força a sugerir 1 comando
     if _looks_like_data_question(msg):
         prompt = (
-            "O usuário quer um resultado que normalmente exigiria consultar dados.\n"
-            "Explique como chegar ao resultado e dê UMA ou DUAS sugestões concretas de comandos que ele pode enviar, "
-            "referindo-se a 'tabela' e 'colunas' genericamente (sem inventar nomes). "
-            "Depois, responda conceitualmente o que a métrica significaria.\n\n"
+            "O usuário quer um resultado que requer consulta ao banco.\n"
+            "Proponha EXATAMENTE UM comando do Sentinela dentro de [[RUN]]...[[/RUN]] e depois explique.\n\n"
             f"Pedido do usuário: {msg}"
         )
+    else:
+        prompt = f"Pedido do usuário: {msg}\nSe precisar de dados, use [[RUN]]...[[/RUN]]."
 
+    tmp_agent = Agent(name="explainer", model=big_model, system_message=system)
     ok, out, err = _run_with_retry(tmp_agent, prompt)
     return out or (f"Erro: {err}" if err else "Sem resposta.")
+CMD_LINE_RE = re.compile(r'^\s*(mostre|agregue|filtr[ea])\b.+$', re.I | re.M)
+
+def _extract_first_command(text: str) -> str | None:
+    """Pega a primeira linha que parece um comando reconhecido pelos parsers."""
+    if not text:
+        return None
+    m = CMD_LINE_RE.search(text)
+    return m.group(0).strip() if m else None
+
+def _autorun_if_command(text_from_outside: str):
+    """
+    Se o outside escreveu um comando válido (ex.: 'agregue ...'),
+    reenvia esse comando para o planner e já renderiza o HTML de tool.
+    """
+    cmd = _extract_first_command(text_from_outside)
+    if not cmd:
+        return None  # nada para rodar
+
+    mode, payload = planner_route(cmd)
+    if mode == "tool" and payload:
+        banner = (
+            "<div class='muted'>Execução automática (outside): "
+            f"<code>{html.escape(cmd)}</code></div>"
+        )
+        return banner + payload
+    return None
 
 # =========================
 # SQL tools (consultas)
@@ -1217,7 +1284,7 @@ def sql_head_fn(table: str, n: int = 5):
 
 def sql_aggregate_fn(
     table: str,
-    by: str,
+    by,
     value: str | None = None,
     op: str = "sum",
     top: int = 10,
@@ -1228,10 +1295,45 @@ def sql_aggregate_fn(
     if not _table_exists(table):
         return {"status": "error", "message": f"Tabela não encontrada: {table}"}
 
-    cols = set(_sqlite_cols(table))
-    if by not in cols:
-        return {"status": "error", "message": f"Coluna de agrupamento não existe: {by}"}
+    cols_all = set(_sqlite_cols(table))
+    # normaliza BY → lista
+    if isinstance(by, str):
+        by_cols_raw = [c.strip() for c in re.split(r"[,\+\|]", by) if c.strip()]
+    elif isinstance(by, (list, tuple)):
+        by_cols_raw = [str(c).strip() for c in by if str(c).strip()]
+    else:
+        return {"status": "error", "message": "Parâmetro 'by' inválido"}
 
+    if not by_cols_raw:
+        return {"status": "error", "message": "Informe ao menos uma coluna em 'by'"}
+
+    # resolve nomes (aceita chaves semânticas)
+    resolved = []
+    for b in by_cols_raw:
+        col = _key_to_col(table, b) or _resolve_col(table, b) or b
+        if col not in cols_all:
+            return {"status": "error", "message": f"Coluna de agrupamento não existe: {b}"}
+        resolved.append(col)
+
+    # SELECT/GROUP: normaliza DATA para 'date(...)'
+    if not CATALOG:
+        rebuild_catalog()
+
+    select_parts, group_parts, out_cols = [], [], []
+    col_tags = (CATALOG.get(table, {}) or {}).get("col_tags", {})
+    for col in resolved:
+        tags = col_tags.get(col) or set()
+        if "date" in tags:
+            expr = f"date({_date_expr_auto(col)})"
+            alias = col  # mantém nome original
+        else:
+            expr = f'"{col}"'
+            alias = col
+        select_parts.append(f"{expr} AS \"{alias}\"")
+        group_parts.append(expr)
+        out_cols.append(alias)
+
+    # OP
     op = (op or "").lower()
     allowed = {"sum", "count", "avg", "min", "max"}
     if op not in allowed:
@@ -1240,12 +1342,12 @@ def sql_aggregate_fn(
     if op == "count":
         agg_expr = "COUNT(*)"
     else:
-        if value is None or value not in cols:
+        if value is None or value not in cols_all:
             return {"status": "error", "message": "Informe a coluna numérica em `value`"}
         agg_expr = f'{op}(CAST("{value}" AS REAL))'
 
+    # WHERE de período
     where_sql, params = "", []
-    date_col_eff = None
     if start and end:
         date_col_eff = date_col or _guess_cols(table).get("data")
         if date_col_eff:
@@ -1253,13 +1355,17 @@ def sql_aggregate_fn(
             where_sql = f" WHERE date({date_expr}) BETWEEN date(?) AND date(?)"
             params.extend([start, end])
 
-    q = f'SELECT "{by}" AS chave, {agg_expr} AS valor FROM "{table}"'
-    if where_sql: q += where_sql
-    q += f' GROUP BY "{by}" ORDER BY valor DESC LIMIT ?'
+    q = (
+        f'SELECT {", ".join(select_parts)}, {agg_expr} AS valor '
+        f'FROM "{table}"'
+    )
+    if where_sql:
+        q += where_sql
+    q += f" GROUP BY {', '.join(group_parts)} ORDER BY valor DESC LIMIT ?"
     params.append(max(1, int(top)))
 
     rows = _sqlite_exec(q, params)
-    return {"status": "ok", "rows": rows, "meta": {"table": table, "by": by, "op": op, "value": value, "date_col": date_col_eff, "start": start, "end": end}}
+    return {"status": "ok", "rows": rows, "meta": {"table": table, "by": out_cols, "op": op, "value": value, "start": start, "end": end}}
 
 def _guess_cols(table: str):
     cols = _sqlite_cols(table)
@@ -1300,10 +1406,6 @@ def _date_expr_auto(col: str) -> str:
     # posição do '-' em YYYY-MM-DD
     iso_check = f"(instr({base}, '-')=5)"
     # montar aaaa-mm-dd a partir de d/m/aaaa (1 ou 2 dígitos)
-    # p1 = primeira '/', p2 = segunda '/'
-    # dia = substr(base, 1, p1-1)
-    # mes = substr(base, p1+1, p2-p1-1)
-    # ano = substr(base, p2+1, 4)
     y_from_slash = (
         f"substr({base}, "
         f"       instr({base},'/') + instr(substr({base}, instr({base},'/')+1), '/') + 1, 4)"
@@ -1441,6 +1543,21 @@ def _norm_numstr_sql(expr: str) -> str:
         f"END)"
     )
 
+def _extract_eq_pairs(text: str) -> dict:
+    """
+    Varre pares do tipo COL=VAL no texto (com ou sem aspas) e devolve em formato where {COL__eq: VAL}.
+    Ex.: 'LOJA=017 e SKU="999"' -> {"LOJA__eq": "017", "SKU__eq": "999"}
+    """
+    out = {}
+    if not text:
+        return out
+    for m in re.finditer(r'\b([A-Za-z0-9_]+)\s*=\s*("([^"]+)"|\'([^\']+)\'|([^\s,;]+))', text):
+        col = m.group(1)
+        val = m.group(3) or m.group(4) or m.group(5)
+        if val is not None:
+            out[f"{col}__eq"] = val
+    return out
+
 def _build_where(table: str, where: dict) -> tuple[str, list]:
     meta = _guess_cols(table)
     clauses, params = [], []
@@ -1483,7 +1600,7 @@ def _build_where(table: str, where: dict) -> tuple[str, list]:
         elif op == "icontains":
             # normaliza o valor de busca para minúsculas
             val_norm = str(val).lower()
-            # citação da coluna sem f-string aninhada
+            # citação da coluna sem f-string aninhada (evita SyntaxError)
             col_quoted = f'"{col}"'
             col_norm = f"lower({col_quoted})"
             clauses.append(f"{col_norm} LIKE ?")
@@ -1527,9 +1644,32 @@ def _build_where(table: str, where: dict) -> tuple[str, list]:
         else:
             raise ValueError(f"Operador não suportado: {op}")
         
-
     where_sql = " AND ".join(clauses) if clauses else ""
     return where_sql, params
+
+def _envelope(ok: bool, *, answer_type="html", message=None, data=None, stats=None, diagnostics=None, html_str=None):
+    return {
+        "ok": bool(ok),
+        "answer_type": answer_type,
+        "message": message,
+        "data": data if data is not None else [],
+        "stats": stats or {},
+        "diagnostics": diagnostics or {},
+        "html": html_str or "",
+        "status": "ok" if ok else "error",
+    }
+
+def _rows_to_html(rows: list[dict]) -> str:
+    if not rows:
+        return "<div class='muted'>Sem resultados para os filtros aplicados.</div>"
+    cols = list(rows[0].keys())
+    thead = "<thead><tr>" + "".join(f"<th>{html.escape(str(c))}</th>" for c in cols) + "</tr></thead>"
+    body_rows = []
+    for r in rows:
+        tds = "".join(f"<td>{html.escape(str(r.get(c, '')))}</td>" for c in cols)
+        body_rows.append(f"<tr>{tds}</tr>")
+    tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
+    return f"<table>{thead}{tbody}</table>"
 
 def sql_filter_fn(table: str, where: dict | None = None, limit: int = 100,
                   order_by: str | None = None, order: str = "desc", offset: int = 0):
@@ -1580,7 +1720,23 @@ def sql_filter_fn(table: str, where: dict | None = None, limit: int = 100,
         diagnostics={"table": table, "where": where, "order_by": ob_col, "order": ord_kw},
         html_str=_rows_to_html(rows),
     )
-    
+
+def _nl_aggregate_summary(rows: list[dict], *, op: str, by: str) -> str:
+    try:
+        if not rows:
+            return ""
+        # pega top 1 e top 3 somados
+        top1 = rows[0]
+        chave = top1.get("chave")
+        valor = float(top1.get("valor", 0))
+        total_top3 = sum(float(r.get("valor", 0)) for r in rows[:3])
+        if op == "count":
+            return f"• Destaque: {by} '{chave}' tem {int(valor)} registros (top 1). Top 3 somam {int(total_top3)}."
+        else:
+            return f"• Destaque: {by} '{chave}' lidera com {valor:,.2f}. Top 3 somam {total_top3:,.2f}."
+    except Exception:
+        return ""
+
 @app.get("/tool/sql_filter")
 def call_sql_filter(
     table: str = Query(...),
@@ -1623,22 +1779,12 @@ def call_sql_aggregate(
 ):
     return sql_aggregate_fn(table, by, value, op, top)
 
-rebuild_catalog()
-
-@app.get("/catalog")
-def catalog():
-    return {t: {
-        "columns": info["columns"],
-        "table_tags": sorted(info["table_tags"])
-    } for t, info in CATALOG.items()}
-
-
 # =========================
 # Registro das tools e Agent 
 # =========================
 sku_intersection_tool = tool(
     name="sku_intersection",
-     description=(
+    description=(
         "Calcula a interseção de SKUs entre duas TABELAS distintas, aplicando os mesmos filtros de loja e período. "
         "Parâmetros: ajustes (opcional), devol (opcional), loja (ex.: 17), start (AAAA-MM-DD), end (AAAA-MM-DD), limit. "
         "Se os nomes das tabelas não forem informados, a ferramenta escolhe automaticamente com base no catálogo e nas tags."
@@ -1674,30 +1820,6 @@ sql_count_tool = tool(
     name="sql_count",
     description="Conta linhas em uma tabela do SQLite aplicando filtros (where)."
 )(sql_count_fn)
-
-def _envelope(ok: bool, *, answer_type="html", message=None, data=None, stats=None, diagnostics=None, html_str=None):
-    return {
-        "ok": bool(ok),
-        "answer_type": answer_type,
-        "message": message,
-        "data": data if data is not None else [],
-        "stats": stats or {},
-        "diagnostics": diagnostics or {},
-        "html": html_str or "",
-        "status": "ok" if ok else "error",
-    }
-
-def _rows_to_html(rows: list[dict]) -> str:
-    if not rows:
-        return "<div class='muted'>Sem resultados para os filtros aplicados.</div>"
-    cols = list(rows[0].keys())
-    thead = "<thead><tr>" + "".join(f"<th>{html.escape(str(c))}</th>" for c in cols) + "</tr></thead>"
-    body_rows = []
-    for r in rows:
-        tds = "".join(f"<td>{html.escape(str(r.get(c, '')))}</td>" for c in cols)
-        body_rows.append(f"<tr>{tds}</tr>")
-    tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
-    return f"<table>{thead}{tbody}</table>"
 
 def _execute_plan_to_html(plan: Plan) -> str:
     t = plan.tool
@@ -1746,10 +1868,20 @@ def _execute_plan_to_html(plan: Plan) -> str:
         date_col = p.get("date_col")
         start = p.get("start")
         end = p.get("end")
-        return (
-            f"<h3>Agregação em <code>{html.escape(table)}</code></h3>"
-            + to_html_rows(sql_aggregate_fn(table, by, value, op, top, date_col, start, end), "sql_aggregate")
-        )
+        res = sql_aggregate_fn(table, by, value, op, top, date_col, start, end)
+        html_table = to_html_rows(res, "sql_aggregate")
+
+        # pequeno resumo textual (mais natural) para melhorar leitura
+        rows = res.get("rows") if isinstance(res, dict) else None
+        summary = ""
+        if isinstance(rows, list):
+            summary = _nl_aggregate_summary(rows, op=op, by=by)
+
+        intro = f"<h3>Agregação em <code>{html.escape(table)}</code></h3>"
+        if summary:
+            intro += f"<p class='muted'>{html.escape(summary)}</p>"
+        return intro + html_table
+
     if t == "sql_count":
         table = p.get("table")
         where = p.get("where") or {}
@@ -1763,7 +1895,6 @@ def _execute_plan_to_html(plan: Plan) -> str:
             except:
                 total = 0
 
-        # identifica um "COL = VAL" principal (se houver)
         eqs = []
         for k, v in where.items():
             if "__" in k:
@@ -1785,7 +1916,6 @@ def _execute_plan_to_html(plan: Plan) -> str:
                 frase += f' entre {rng[0]} e {rng[1]}'
             return f"<h3>Contagem</h3><p>{html.escape(frase)}</p>"
 
-        # fallback genérico
         return f"<h3>Contagem</h3><p>Total de linhas que atendem aos filtros: <b>{total}</b></p>"
 
     if t == "sku_intersection":
@@ -1836,6 +1966,9 @@ def _execute_plan_to_html(plan: Plan) -> str:
 
         return to_html_rows(res, "sku_intersection")
 
+# =========================
+# Fast-path (comandos diretos)
+# =========================
 _SMALLTALK_RE = re.compile(
     r"^\s*(oi|olá|ola|oie|hey|eai|e aí|fala|salve|bom dia|boa tarde|boa noite|"
     r"valeu|obg|obrigado|brigado|tudo bem|blz|beleza|teste|test|ping)\s*[!?.,]*\s*$",
@@ -1889,15 +2022,15 @@ def fastpath_markdown(msg: str) -> str | None:
         rows = res.get("rows") or []
         html_table = _rows_to_html(rows)
         return f"<h3>Amostra de <code>{html.escape(table)}</code></h3>{html_table}"
+
     m = re.search(
         r"filtr(a|e)(?:\s+(.+?))?\s+em\s+([A-Za-z0-9_\.]+)(?:.*?(?:até|limite)\s+(\d+))?",
         msg, re.I
-         )
+    )
     if m:
         conds_str = (m.group(2) or "").strip()
         table = m.group(3)
         limit_s = m.group(4)
-        # ... (o restante do bloco fica igual, mas acrescente estes parsers:)
         where = {}
 
         # 1) lista 'IN'
@@ -1924,7 +2057,7 @@ def fastpath_markdown(msg: str) -> str | None:
                     where[key] = val
                     break
 
-        # 2) intervalo de datas em linguagem natural, mesmo se não vier em 'conds_str'
+        # 2) intervalo de datas em linguagem natural
         if re.search(r"\bentre\s+.+\s+e\s+.+", msg, re.I):
             s, e = _extract_time_range_pt(msg, table)
             if s and e:
@@ -1940,6 +2073,7 @@ def fastpath_markdown(msg: str) -> str | None:
             html_table = _rows_to_html(data)
             return f"<h3>Filtro em <code>{html.escape(table)}</code> (SQLite)</h3>{html_table}"
 
+
 def _rows_to_md(rows: list[dict]) -> str:
     if not rows:
         return "_sem resultados_"
@@ -1948,6 +2082,9 @@ def _rows_to_md(rows: list[dict]) -> str:
     sep  = "| " + " | ".join(["---"] * len(cols)) + " |"
     body = "\n".join("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |" for r in rows)
     return "\n".join([head, sep, body])
+# =========================
+# Agente principal
+# =========================
 
 agent = Agent(
     name="sentinela",
@@ -1959,12 +2096,12 @@ agent = Agent(
         "• Filtrar por colunas/condições → sql_filter.\n"
         "• Agregar (sum, count, avg, min, max) → sql_aggregate.\n"
         "• Descobrir SKUs presentes em DUAS TABELAS (mesmos filtros) → sku_intersection.\n"
+        "• Contagens simples (ex.: “LOJA=333 aparece quantas vezes”) → sql_count.\n"
         "Converta períodos de tempo para datas AAAA-MM-DD quando necessário, normalize códigos de loja (remova zeros à esquerda) "
     ),
-    tools=[head_csv_tool, list_csvs_tool, sql_head_tool, sql_aggregate_tool, sql_filter_tool, sku_intersection_tool],
+    tools=[head_csv_tool, list_csvs_tool, sql_head_tool, sql_aggregate_tool, sql_filter_tool, sku_intersection_tool, sql_count_tool,  sql_count_tool],
     model=_make_model(PRIMARY_MODEL, "primary")
 )
-
 
 # =========================
 # Chat JSON + Chat HTML + UI
@@ -1984,9 +2121,6 @@ def chat(in_: ChatIn, response: Response):
         raw = (in_.message or "").strip()
         forced, msg = _extract_forced_provider(raw)
 
-        # defaults seguros caso USE_PLANNER seja desativado no futuro
-        mode, payload = ("delegate_outside", None)
-
         # 1) smalltalk/help
         if _is_smalltalk(msg):
             _set_resp_headers(response, provider="none", model_id="smalltalk", path="fastpath")
@@ -1999,22 +2133,49 @@ def chat(in_: ChatIn, response: Response):
             return {"answer": md}
 
         # 3) planner (opcional)
+        mode, payload = ("delegate_outside", None)
         if 'USE_PLANNER' in globals() and USE_PLANNER:
             res = planner_route(msg)
             if isinstance(res, (tuple, list)) and len(res) == 2:
                 mode, payload = res
-            else:
-                mode, payload = ("delegate_outside", None)
 
         if mode == "tool" and payload:
             _set_resp_headers(response, provider="free-or-primary", model_id="planner", path="planner->tool")
-            # payload já vem como HTML; envolva numa div para manter o padrão da UI:
             return f"<div class='reply'>{payload}</div>"
-
+# --- delegate_outside + autoexec (JSON) ---
         if mode == "delegate_outside" and SEMANTIC_FALLBACK:
             out = _answer_outside_tools(msg)
             _set_resp_headers(response, provider="primary", model_id=PRIMARY_MODEL, path="planner->outside")
-            return f"<div class='reply'>{render_md(out)}</div>"
+
+            cmds = _extract_run_commands(out)
+
+            explanation_md = re.sub(r"\[\[RUN\]\].+?\[\[/RUN\]\]", "", out, flags=re.S)
+            html_expl = render_md(explanation_md)
+
+            if OUTSIDE_AUTOEXEC and cmds:
+                exec_blocks = []
+                for cmd in cmds:
+                    html_exec = fastpath_markdown(cmd)
+                    if not html_exec:
+                        mode2, payload2 = planner_route(cmd)
+                        if mode2 == "tool" and payload2:
+                            html_exec = payload2
+                    if not html_exec:
+                        html_exec = "<div class='muted'>Comando sugerido não reconhecido para execução automática.</div>"
+                    exec_blocks.append(html_exec)
+
+                joined = "<hr/>".join(exec_blocks)
+                return {
+                    "answer": (
+                        f"<div class='reply'>{html_expl}"
+                        f"<div class='muted' style='margin-top:8px'>Execução automática (outside):</div>"
+                        f"{joined}</div>"
+                    )
+                }
+
+            return {"answer": f"<div class='reply'>{html_expl}</div>"}
+
+
         # 4) agente principal com roteamento + fallback
         provider, model_id = _route_model(msg)
         if forced == "free" and FREE_MODEL_ID:
@@ -2057,22 +2218,46 @@ def chat_html(message: str | None = None, in_: ChatIn | None = None, response:Re
         return f"<div class='reply'>{render_md(fast)}</div>"
 
     # 3) planner (opcional)
+    mode, payload = ("delegate_outside", None)
     if 'USE_PLANNER' in globals() and USE_PLANNER:
         res = planner_route(msg)
         if isinstance(res, (tuple, list)) and len(res) == 2:
             mode, payload = res
-        else:
-            mode, payload = ("delegate_outside", None)
 
         if mode == "tool" and payload:
-            # payload já é HTML vindo de _execute_plan_to_html
             _set_resp_headers(response, provider="free-or-primary", model_id="planner", path="planner->tool")
             return f"<div class='reply'>{payload}</div>"
 
+# --- delegate_outside + autoexec (HTML) ---
         if mode == "delegate_outside" and SEMANTIC_FALLBACK:
             out = _answer_outside_tools(msg)
             _set_resp_headers(response, provider="primary", model_id=PRIMARY_MODEL, path="planner->outside")
-            return f"<div class='reply'>{render_md(out)}</div>"
+
+            cmds = _extract_run_commands(out)
+
+            explanation_md = re.sub(r"\[\[RUN\]\].+?\[\[/RUN\]\]", "", out, flags=re.S)
+            html_expl = render_md(explanation_md)
+
+            if OUTSIDE_AUTOEXEC and cmds:
+                exec_blocks = []
+                for cmd in cmds:
+                    html_exec = fastpath_markdown(cmd)
+                    if not html_exec:
+                        mode2, payload2 = planner_route(cmd)
+                        if mode2 == "tool" and payload2:
+                            html_exec = payload2
+                    if not html_exec:
+                        html_exec = "<div class='muted'>Comando sugerido não reconhecido para execução automática.</div>"
+                    exec_blocks.append(html_exec)
+
+                joined = "<hr/>".join(exec_blocks)
+                return (
+                    f"<div class='reply'>{html_expl}"
+                    f"<div class='muted' style='margin-top:8px'>Execução automática (outside):</div>"
+                    f"{joined}</div>"
+                )
+
+            return f"<div class='reply'>{html_expl}</div>"
 
     # 4) agente principal com roteamento + fallback
     provider, model_id = _route_model(msg)
@@ -2093,9 +2278,11 @@ def chat_html(message: str | None = None, in_: ChatIn | None = None, response:Re
         final = out or (f"Erro: {err}" if err else "")
         _set_resp_headers(response, provider=provider, model_id=model_id, path="agent")
 
-    # out/final pode ser markdown; renderizamos sempre
     return f"<div class='reply'>{render_md(final)}</div>"
 
+# =========================
+# UI Web simples
+# =========================
 @app.get("/", response_class=HTMLResponse)
 def chat_ui():
     return HTMLResponse(
@@ -2120,34 +2307,30 @@ def chat_ui():
   input[type=text]{flex:1;padding:12px 14px;border-radius:12px;border:1px solid #26344d;background:var(--in);color:var(--txt);outline:none}
   button{padding:12px 16px;border-radius:12px;border:0;background:var(--accent);color:white;font-weight:600;cursor:pointer}
   button[disabled]{opacity:.6;cursor:not-allowed}
-  .reply table{border-collapse: collapse; width:100%; overflow:auto}
+
   .reply table{
-  border-collapse: collapse;
-  width:100%;
-  display:block;          /* permite overflow horizontal */
-  overflow-x:auto;
-  white-space:nowrap;     /* evita quebra feia de células */
-  border:1px solid #21314f;
-  border-radius:8px;
-}
-
-.reply table th, .reply table td{
-  border-bottom:1px solid #21314f;
-  padding:8px 10px;
-  text-align:left;
-}
-
-.reply table thead th{
-  position:sticky;
-  top:0;
-  background:#0e223e;     /* cabeçalho fixo */
-  z-index:1;
-}
-
-.reply table tbody tr:nth-child(even){
-  background:#0c1a30;     /* zebra */
-}
-
+    border-collapse: collapse;
+    width:100%;
+    display:block;
+    overflow-x:auto;
+    white-space:nowrap;
+    border:1px solid #21314f;
+    border-radius:8px;
+  }
+  .reply table th, .reply table td{
+    border-bottom:1px solid #21314f;
+    padding:8px 10px;
+    text-align:left;
+  }
+  .reply table thead th{
+    position:sticky;
+    top:0;
+    background:#0e223e;
+    z-index:1;
+  }
+  .reply table tbody tr:nth-child(even){
+    background:#0c1a30;
+  }
   .reply code{background:#0e223e;padding:2px 6px;border-radius:6px}
   .typing{align-self:flex-start;color:var(--muted);font-style:italic}
   .metrics{
@@ -2162,15 +2345,12 @@ def chat_ui():
   .metrics .dot.err{background:#ef4444}
   .metrics b{color:#e8eefc}
   .msg .badge{
-  margin-top:6px;
-  font-size:12px;
-  color: var(--muted);
-  opacity:.9;
-}
-.msg.bot .badge{
-  text-align:right;
-}
-
+    margin-top:6px;
+    font-size:12px;
+    color: var(--muted);
+    opacity:.9;
+  }
+  .msg.bot .badge{ text-align:right; }
 </style>
 </head>
 <body>
@@ -2199,22 +2379,21 @@ def chat_ui():
     localStorage.setItem(SID_KEY, SID);
   }
 
- function addBubble(text, who='bot', isHTML=false, meta=null){
-  const div = document.createElement('div');
-  div.className = 'msg ' + (who==='user' ? 'user' : 'bot');
-  if(isHTML){ div.innerHTML = text; } else { div.textContent = text; }
+  function addBubble(text, who='bot', isHTML=false, meta=null){
+    const div = document.createElement('div');
+    div.className = 'msg ' + (who==='user' ? 'user' : 'bot');
+    if(isHTML){ div.innerHTML = text; } else { div.textContent = text; }
 
-  if(meta){
-    const m = document.createElement('div');
-    m.className = 'badge';
-    m.textContent = meta;
-    div.appendChild(m);
+    if(meta){
+      const m = document.createElement('div');
+      m.className = 'badge';
+      m.textContent = meta;
+      div.appendChild(m);
+    }
+    chatEl.appendChild(div);
+    chatEl.scrollTop = chatEl.scrollHeight;
   }
-  chatEl.appendChild(div);
-  chatEl.scrollTop = chatEl.scrollHeight;
-}
 
-  
   function addTyping(){
     const d = document.createElement('div');
     d.className = 'msg typing';
@@ -2233,7 +2412,6 @@ def chat_ui():
 
     const typing = addTyping();
     try{
-      // ✅ UMA chamada só, com X-Client-Id
       const res = await fetch('/chat_html', {
         method:'POST',
         headers:{
@@ -2251,7 +2429,6 @@ def chat_ui():
       const html = await res.text();
       typing.remove();
       addBubble(html, 'bot', true, meta);
-
 
     }catch(e){
       typing.remove();
@@ -2295,5 +2472,10 @@ def chat_ui():
   setInterval(pollStats, 5000);
   pollStats();
 </script>
+</body>
+</html>
         """
     )
+
+# inicializa catálogo na carga do módulo
+rebuild_catalog()
