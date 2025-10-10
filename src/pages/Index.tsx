@@ -154,7 +154,7 @@ const Index = () => {
     let assistantContent = "";
     try {
       // Removed timeout to allow unlimited wait time for webhook response
-      const response = await fetch("https://webhook.pd.oscarcloud.com.br/webhook/chat-sentinela-pd1245", {
+      const response = await fetch("https://webhook.pd.oscarcloud.com.br/webhook/test-sl", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
