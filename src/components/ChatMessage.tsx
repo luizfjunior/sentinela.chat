@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { UserRound } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
-import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 
 interface Message {
   id: string;
@@ -28,9 +28,47 @@ const ChatMessage = ({
   const [isTyping, setIsTyping] = useState(false);
   const isUser = message.role === "user";
 
-  // Process content to handle line breaks
+  // Process content to handle line breaks, fix table formatting, and decode HTML entities
   const processContent = (content: string) => {
-    return content.replace(/\\n\\n/g, '\n\n').replace(/\\n/g, '\n');
+    let processed = content.replace(/\\n\\n/g, '\n\n').replace(/\\n/g, '\n');
+    
+    // Decode HTML entities
+    processed = processed.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+    
+    // Detect and fix table formatting - more aggressive approach
+    // Look for patterns like: | col | col | col |
+    if (processed.includes('|') && processed.includes('SKU')) {
+      // Split by | and rebuild with proper line breaks
+      const lines = processed.split('|');
+      let tableContent = '';
+      let currentRow = [];
+      
+      for (let i = 0; i < lines.length; i++) {
+        const cell = lines[i].trim();
+        if (cell) {
+          currentRow.push(cell);
+          // If we have 4 cells (SKU + 3 columns), complete the row
+          if (currentRow.length === 4) {
+            tableContent += '| ' + currentRow.join(' | ') + ' |\n';
+            currentRow = [];
+          }
+        }
+      }
+      
+      if (tableContent) {
+        // Add table header separator
+        const headerSeparator = '|---|---|---|---|\n';
+        const lines = tableContent.split('\n').filter(line => line.trim());
+        if (lines.length > 0) {
+          processed = lines[0] + '\n' + headerSeparator + lines.slice(1).join('\n');
+        }
+      }
+    }
+    
+    // Clean up multiple consecutive newlines
+    processed = processed.replace(/\n{3,}/g, '\n\n');
+    
+    return processed;
   };
   const processedContent = processContent(message.content);
 
@@ -89,7 +127,7 @@ const ChatMessage = ({
           </div>
         )}
 
-        <div className="max-w-full break-words">
+        <div className="max-w-full break-words overflow-hidden">
           {/* Usuário: mensagem pura */}
           {isUser ? (
             <p className="whitespace-pre-wrap leading-relaxed text-white">{displayedContent}</p>
@@ -120,15 +158,25 @@ const ChatMessage = ({
                   pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3 text-white">{children}</pre>,
                   blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic mb-3 text-white">{children}</blockquote>,
                   table: ({ children }) => (
-                    <div className="overflow-x-auto mb-4">
-                      <table className="min-w-full border-collapse border border-gray-600 text-white">{children}</table>
+                    <div className="my-4 overflow-x-auto">
+                      <table className="w-full border-collapse bg-gray-800 rounded-lg overflow-hidden">
+                        {children}
+                      </table>
                     </div>
                   ),
-                  thead: ({ children }) => <thead className="bg-gray-800">{children}</thead>,
+                  thead: ({ children }) => <thead className="bg-gray-700">{children}</thead>,
                   tbody: ({ children }) => <tbody>{children}</tbody>,
-                  tr: ({ children }) => <tr className="border-b border-gray-600 hover:bg-gray-800/50">{children}</tr>,
-                  th: ({ children }) => <th className="border border-gray-600 px-4 py-2 text-left font-bold text-white">{children}</th>,
-                  td: ({ children }) => <td className="border border-gray-600 px-4 py-2 text-white">{children}</td>,
+                  tr: ({ children }) => <tr className="border-b border-gray-600 hover:bg-gray-750">{children}</tr>,
+                  th: ({ children }) => (
+                    <th className="px-4 py-3 text-left font-semibold text-gray-200 bg-gray-700 border-r border-gray-600 last:border-r-0">
+                      {children}
+                    </th>
+                  ),
+                  td: ({ children }) => (
+                    <td className="px-4 py-3 text-gray-100 border-r border-gray-600 last:border-r-0">
+                      {children}
+                    </td>
+                  )
                 }}>
                   {displayedContent}
                 </ReactMarkdown>
@@ -149,4 +197,3 @@ const ChatMessage = ({
 };
 
 export default ChatMessage;
-
