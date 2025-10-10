@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { UserRound } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   id: string;
@@ -103,6 +104,7 @@ const ChatMessage = ({
                 </div>
               ) : (
                 <ReactMarkdown 
+                  remarkPlugins={[remarkGfm]}
                   rehypePlugins={[rehypeRaw]}
                   components={{
                   p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-white">{children}</p>,
