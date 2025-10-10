@@ -28,47 +28,10 @@ const ChatMessage = ({
   const [isTyping, setIsTyping] = useState(false);
   const isUser = message.role === "user";
 
-  // Process content to handle line breaks, fix table formatting, and decode HTML entities
+  // Process content to handle line breaks - let remark-gfm handle table parsing
   const processContent = (content: string) => {
-    let processed = content.replace(/\\n\\n/g, '\n\n').replace(/\\n/g, '\n');
-    
-    // Decode HTML entities
-    processed = processed.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-    
-    // Detect and fix table formatting - more aggressive approach
-    // Look for patterns like: | col | col | col |
-    if (processed.includes('|') && processed.includes('SKU')) {
-      // Split by | and rebuild with proper line breaks
-      const lines = processed.split('|');
-      let tableContent = '';
-      let currentRow = [];
-      
-      for (let i = 0; i < lines.length; i++) {
-        const cell = lines[i].trim();
-        if (cell) {
-          currentRow.push(cell);
-          // If we have 4 cells (SKU + 3 columns), complete the row
-          if (currentRow.length === 4) {
-            tableContent += '| ' + currentRow.join(' | ') + ' |\n';
-            currentRow = [];
-          }
-        }
-      }
-      
-      if (tableContent) {
-        // Add table header separator
-        const headerSeparator = '|---|---|---|---|\n';
-        const lines = tableContent.split('\n').filter(line => line.trim());
-        if (lines.length > 0) {
-          processed = lines[0] + '\n' + headerSeparator + lines.slice(1).join('\n');
-        }
-      }
-    }
-    
-    // Clean up multiple consecutive newlines
-    processed = processed.replace(/\n{3,}/g, '\n\n');
-    
-    return processed;
+    // Simply replace escaped newlines with real newlines
+    return content.replace(/\\n/g, '\n');
   };
   const processedContent = processContent(message.content);
 
