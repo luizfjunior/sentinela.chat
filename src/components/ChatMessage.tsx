@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { UserRound } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
+import rehypeRaw from 'rehype-raw';
 
 interface Message {
   id: string;
@@ -101,7 +102,9 @@ const ChatMessage = ({
                   <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
                 </div>
               ) : (
-                <ReactMarkdown components={{
+                <ReactMarkdown 
+                  rehypePlugins={[rehypeRaw]}
+                  components={{
                   p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed text-white">{children}</p>,
                   h1: ({ children }) => <h1 className="text-xl font-bold mb-3 text-white">{children}</h1>,
                   h2: ({ children }) => <h2 className="text-lg font-bold mb-2 text-white">{children}</h2>,
@@ -113,7 +116,17 @@ const ChatMessage = ({
                   li: ({ children }) => <li className="leading-relaxed text-white">{children}</li>,
                   code: ({ children }) => <code className="bg-gray-700 px-1 py-0.5 rounded text-sm font-mono text-white">{children}</code>,
                   pre: ({ children }) => <pre className="bg-gray-700 p-3 rounded-lg overflow-x-auto mb-3 text-white">{children}</pre>,
-                  blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic mb-3 text-white">{children}</blockquote>
+                  blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic mb-3 text-white">{children}</blockquote>,
+                  table: ({ children }) => (
+                    <div className="overflow-x-auto mb-4">
+                      <table className="min-w-full border-collapse border border-gray-600 text-white">{children}</table>
+                    </div>
+                  ),
+                  thead: ({ children }) => <thead className="bg-gray-800">{children}</thead>,
+                  tbody: ({ children }) => <tbody>{children}</tbody>,
+                  tr: ({ children }) => <tr className="border-b border-gray-600 hover:bg-gray-800/50">{children}</tr>,
+                  th: ({ children }) => <th className="border border-gray-600 px-4 py-2 text-left font-bold text-white">{children}</th>,
+                  td: ({ children }) => <td className="border border-gray-600 px-4 py-2 text-white">{children}</td>,
                 }}>
                   {displayedContent}
                 </ReactMarkdown>
