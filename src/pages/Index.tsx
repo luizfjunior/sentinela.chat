@@ -364,12 +364,7 @@ const Index = () => {
       {/* Chat Input */}
       <div className="sticky bottom-0 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 bg-zinc-700">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <ChatInput 
-            onSendMessage={handleSendMessage} 
-            onSendAudio={handleSendAudio} 
-            isLoading={loading}
-            showSuggestions={messages.length === 0}
-          />
+          <ChatInput onSendMessage={handleSendMessage} onSendAudio={handleSendAudio} isLoading={loading} />
         </div>
       </div>
     </div>

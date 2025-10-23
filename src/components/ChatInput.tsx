@@ -5,23 +5,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Send, Paperclip, Image, Mic } from "lucide-react";
 import { useAudioRecording } from "@/hooks/useAudioRecording";
 import AudioRecorder from "./AudioRecorder";
-import PromptSuggestions from "./PromptSuggestions";
 import { toast } from "sonner";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
   onSendAudio?: (audioBlob: Blob) => void;
-  onSuggestionClick?: (prompt: string) => void;
   isLoading: boolean;
-  showSuggestions?: boolean;
 }
 
 const ChatInput = ({
   onSendMessage,
   onSendAudio,
-  onSuggestionClick,
-  isLoading,
-  showSuggestions = false
+  isLoading
 }: ChatInputProps) => {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -75,20 +70,6 @@ const ChatInput = ({
     cancelRecording();
   };
 
-  const handleSuggestionClick = (prompt: string) => {
-    setInput(prompt);
-    if (onSuggestionClick) {
-      onSuggestionClick(prompt);
-    }
-    // Focus the textarea after filling
-    setTimeout(() => {
-      textareaRef.current?.focus();
-    }, 0);
-  };
-
-  // Show suggestions only when input is empty, not recording, not loading
-  const shouldShowSuggestions = showSuggestions && !input.trim() && !isRecording && !isLoading;
-
   if (isRecording) {
     return <div className="relative">
         <AudioRecorder recordingTime={recordingTime} onCancel={handleCancelRecording} onSend={handleSendAudio} />
@@ -99,12 +80,6 @@ const ChatInput = ({
   }
 
   return <div className="relative">
-      {/* Prompt Suggestions */}
-      <PromptSuggestions 
-        onSuggestionClick={handleSuggestionClick}
-        isVisible={shouldShowSuggestions}
-      />
-      
       <form onSubmit={handleSubmit} className="relative">
         <div className="relative flex items-center rounded-2xl border border-gray-200 dark:border-gray-700 shadow-lg hover:shadow-xl transition-shadow bg-gray-200">
           {/* Attachment buttons */}
