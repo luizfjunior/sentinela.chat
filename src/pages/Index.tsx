@@ -154,7 +154,7 @@ const Index = () => {
     let assistantContent = "";
     try {
       // Removed timeout to allow unlimited wait time for webhook response
-      const response = await fetch("https://webhook.pd.oscarcloud.com.br/webhook/test-sl", {
+      const response = await fetch("https://n8n.pd.oscarcloud.com.br/webhook-test/ed31b5e4-91f3-", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -244,7 +244,7 @@ const Index = () => {
 
         try {
           // Removed timeout to allow unlimited wait time for webhook response
-          const response = await fetch("https://webhook.pd.oscarcloud.com.br/webhook/chat-sentinela-pd1245", {
+          const response = await fetch("https://n8n.pd.oscarcloud.com.br/webhook-test/ed31b5e4-91f3-", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
