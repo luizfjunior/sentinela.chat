@@ -23,16 +23,16 @@ const statusConfig: Record<string, { label: string; className: string }> = {
     className: 'bg-gray-500/10 text-gray-400 border-gray-500/20'
   },
   aberto: {
-    label: 'Aberto',
+    label: 'Ocorrência',
     className: 'bg-blue-500/10 text-blue-500 border-blue-500/20'
   },
   pendente_resposta: {
-    label: 'Aguardando',
+    label: 'Não Fraude',
     className: 'bg-purple-500/10 text-purple-500 border-purple-500/20'
   },
   concluido: {
-    label: 'Concluído',
-    className: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+    label: 'Fraude',
+    className: 'bg-red-500/10 text-red-500 border-red-500/20'
   },
   arquivado: {
     label: 'Arquivado',
