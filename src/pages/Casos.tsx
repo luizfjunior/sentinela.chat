@@ -108,11 +108,11 @@ export default function Casos() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Ocorrências</h1>
-          <p className="text-muted-foreground">Gerencie investigações de fraude</p>
+          <p className="text-muted-foreground">Gerencie suas investigações e riscos de fraude</p>
         </div>
         <Button className="w-fit">
           <Plus className="h-4 w-4 mr-2" />
-          Novo Caso
+          Nova Ocorrência   
         </Button>
       </div>
 
@@ -152,9 +152,7 @@ export default function Casos() {
               <Button variant={viewMode === "kanban" ? "secondary" : "ghost"} size="icon" className="h-8 w-8" onClick={() => setViewMode("kanban")}>
                 <LayoutGrid className="h-4 w-4" />
               </Button>
-              <Button variant={viewMode === "list" ? "secondary" : "ghost"} size="icon" className="h-8 w-8" onClick={() => setViewMode("list")}>
-                <List className="h-4 w-4" />
-              </Button>
+              
             </div>
           </div>
         </CardContent>
