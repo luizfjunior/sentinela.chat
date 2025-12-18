@@ -1,15 +1,7 @@
 import { useState } from "react";
-import { Search, Play, Calendar } from "lucide-react";
-import { mockStores } from "@/data/mockData";
+import { Search, Play, Calendar, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -108,22 +100,19 @@ export default function Alertas() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Store Select */}
+              {/* Store Input */}
               <div className="space-y-2">
                 <Label className="text-foreground text-sm">Loja</Label>
-                <Select 
-                  value={filters[analysis.id].store} 
-                  onValueChange={(value) => updateFilter(analysis.id, "store", value)}
-                >
-                  <SelectTrigger className="bg-background border-border">
-                    <SelectValue placeholder="Selecione a loja" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {mockStores.map(store => (
-                      <SelectItem key={store.id} value={store.id}>{store.nome}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="relative">
+                  <Store className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Digite o número da loja"
+                    value={filters[analysis.id].store}
+                    onChange={(e) => updateFilter(analysis.id, "store", e.target.value)}
+                    className="pl-9 bg-background border-border"
+                  />
+                </div>
               </div>
 
               {/* Date Range */}
