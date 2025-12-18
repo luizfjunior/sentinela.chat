@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, Play, CalendarIcon } from "lucide-react";
+import { Search, Play, Calendar } from "lucide-react";
 import { mockStores } from "@/data/mockData";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,12 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
-import { cn } from "@/lib/utils";
 
 interface AnalysisType {
   id: string;
@@ -55,18 +51,18 @@ const analysisTypes: AnalysisType[] = [
 
 interface AnalysisFilters {
   store: string;
-  startDate: Date | undefined;
-  endDate: Date | undefined;
+  startDate: string;
+  endDate: string;
 }
 
 export default function Alertas() {
   const [filters, setFilters] = useState<Record<string, AnalysisFilters>>({
-    leve: { store: "", startDate: undefined, endDate: undefined },
-    medio: { store: "", startDate: undefined, endDate: undefined },
-    critico: { store: "", startDate: undefined, endDate: undefined }
+    leve: { store: "", startDate: "", endDate: "" },
+    medio: { store: "", startDate: "", endDate: "" },
+    critico: { store: "", startDate: "", endDate: "" }
   });
 
-  const updateFilter = (analysisId: string, field: keyof AnalysisFilters, value: string | Date | undefined) => {
+  const updateFilter = (analysisId: string, field: keyof AnalysisFilters, value: string) => {
     setFilters(prev => ({
       ...prev,
       [analysisId]: {
@@ -134,61 +130,27 @@ export default function Alertas() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label className="text-foreground text-sm">Data Inicial</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal bg-background border-border",
-                          !filters[analysis.id].startDate && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {filters[analysis.id].startDate 
-                          ? format(filters[analysis.id].startDate, "dd/MM/yyyy", { locale: ptBR })
-                          : <span>Selecione</span>
-                        }
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={filters[analysis.id].startDate}
-                        onSelect={(date) => updateFilter(analysis.id, "startDate", date)}
-                        initialFocus
-                        className={cn("p-3 pointer-events-auto")}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="date"
+                      value={filters[analysis.id].startDate}
+                      onChange={(e) => updateFilter(analysis.id, "startDate", e.target.value)}
+                      className="pl-9 bg-background border-border"
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label className="text-foreground text-sm">Data Final</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal bg-background border-border",
-                          !filters[analysis.id].endDate && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {filters[analysis.id].endDate 
-                          ? format(filters[analysis.id].endDate, "dd/MM/yyyy", { locale: ptBR })
-                          : <span>Selecione</span>
-                        }
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={filters[analysis.id].endDate}
-                        onSelect={(date) => updateFilter(analysis.id, "endDate", date)}
-                        initialFocus
-                        className={cn("p-3 pointer-events-auto")}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="date"
+                      value={filters[analysis.id].endDate}
+                      onChange={(e) => updateFilter(analysis.id, "endDate", e.target.value)}
+                      className="pl-9 bg-background border-border"
+                    />
+                  </div>
                 </div>
               </div>
 
