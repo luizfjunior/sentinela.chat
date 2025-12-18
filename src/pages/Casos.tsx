@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Search, LayoutGrid, List, AlertTriangle, Calendar, User } from "lucide-react";
+import { Plus, Search, LayoutGrid, Calendar, Store } from "lucide-react";
 import { mockCases, Case } from "@/data/mockData";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { PriorityBadge } from "@/components/shared/PriorityBadge";
@@ -11,12 +11,62 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+
 export default function Casos() {
   const [cases, setCases] = useState<Case[]>([...mockCases]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const [selectedPriority, setSelectedPriority] = useState<string>("all");
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  // Form state
+  const [novaOcorrencia, setNovaOcorrencia] = useState({
+    titulo: "",
+    descricao: "",
+    loja: "",
+    prioridade: "media" as Case['prioridade'],
+    valorEnvolvido: ""
+  });
+
+  const handleCreateOcorrencia = () => {
+    if (!novaOcorrencia.titulo.trim()) {
+      toast.error("Título é obrigatório");
+      return;
+    }
+    if (!novaOcorrencia.loja.trim()) {
+      toast.error("Loja é obrigatória");
+      return;
+    }
+
+    const newCase: Case = {
+      id: `case-${Date.now()}`,
+      titulo: novaOcorrencia.titulo,
+      descricao: novaOcorrencia.descricao,
+      status: "aberto",
+      prioridade: novaOcorrencia.prioridade,
+      lojaId: novaOcorrencia.loja,
+      lojaNome: `Loja ${novaOcorrencia.loja}`,
+      alertasVinculados: 0,
+      valorTotalEnvolvido: parseFloat(novaOcorrencia.valorEnvolvido) || 0,
+      responsavel: "Não atribuído",
+      createdAt: new Date()
+    };
+
+    setCases(prev => [newCase, ...prev]);
+    setNovaOcorrencia({
+      titulo: "",
+      descricao: "",
+      loja: "",
+      prioridade: "media",
+      valorEnvolvido: ""
+    });
+    setIsModalOpen(false);
+    toast.success("Ocorrência criada com sucesso!");
+  };
   const filteredCases = cases.filter(caso => {
     const matchesSearch = caso.titulo.toLowerCase().includes(searchTerm.toLowerCase()) || caso.descricao.toLowerCase().includes(searchTerm.toLowerCase()) || caso.lojaNome.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = selectedStatus === "all" || caso.status === selectedStatus;
@@ -110,11 +160,95 @@ export default function Casos() {
           <h1 className="text-2xl font-bold text-foreground">Ocorrências</h1>
           <p className="text-muted-foreground">Gerencie suas investigações e riscos de fraude</p>
         </div>
-        <Button className="w-fit">
+        <Button className="w-fit" onClick={() => setIsModalOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
           Nova Ocorrência   
         </Button>
       </div>
+
+      {/* Modal Nova Ocorrência */}
+      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Nova Ocorrência</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="titulo">Título *</Label>
+              <Input
+                id="titulo"
+                placeholder="Ex: Suspeita de fraude em devolução"
+                value={novaOcorrencia.titulo}
+                onChange={(e) => setNovaOcorrencia(prev => ({ ...prev, titulo: e.target.value }))}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="descricao">Descrição</Label>
+              <Textarea
+                id="descricao"
+                placeholder="Descreva os detalhes da ocorrência..."
+                rows={3}
+                value={novaOcorrencia.descricao}
+                onChange={(e) => setNovaOcorrencia(prev => ({ ...prev, descricao: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="loja">Loja *</Label>
+                <div className="relative">
+                  <Store className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="loja"
+                    placeholder="Número da loja"
+                    className="pl-9"
+                    value={novaOcorrencia.loja}
+                    onChange={(e) => setNovaOcorrencia(prev => ({ ...prev, loja: e.target.value }))}
+                  />
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="prioridade">Prioridade</Label>
+                <Select
+                  value={novaOcorrencia.prioridade}
+                  onValueChange={(value: Case['prioridade']) => setNovaOcorrencia(prev => ({ ...prev, prioridade: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="baixa">Baixa</SelectItem>
+                    <SelectItem value="media">Média</SelectItem>
+                    <SelectItem value="alta">Alta</SelectItem>
+                    <SelectItem value="urgente">Urgente</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="valor">Valor Envolvido (R$)</Label>
+              <Input
+                id="valor"
+                type="number"
+                placeholder="0,00"
+                value={novaOcorrencia.valorEnvolvido}
+                onChange={(e) => setNovaOcorrencia(prev => ({ ...prev, valorEnvolvido: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleCreateOcorrencia}>
+              Criar Ocorrência
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Filters */}
       <Card className="bg-card border-border">
