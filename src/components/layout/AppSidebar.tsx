@@ -35,7 +35,7 @@ const navItems = [
     icon: Search
   },
   { 
-    title: "Casos", 
+    title: "Ocorrências", 
     url: "/casos", 
     icon: FolderOpen,
     badge: 3

@@ -34,10 +34,10 @@ export default function Casos() {
   });
 
   const kanbanColumns = [
-    { id: 'aberto', title: 'Aberto', cases: filteredCases.filter(c => c.status === 'aberto') },
+    { id: 'aberto', title: 'Ocorrência', cases: filteredCases.filter(c => c.status === 'aberto') },
     { id: 'em_analise', title: 'Em Análise', cases: filteredCases.filter(c => c.status === 'em_analise') },
-    { id: 'pendente_resposta', title: 'Aguardando', cases: filteredCases.filter(c => c.status === 'pendente_resposta') },
-    { id: 'concluido', title: 'Concluído', cases: filteredCases.filter(c => c.status === 'concluido' || c.status === 'arquivado') }
+    { id: 'pendente_resposta', title: 'Não Fraude', cases: filteredCases.filter(c => c.status === 'pendente_resposta') },
+    { id: 'concluido', title: 'Fraude', cases: filteredCases.filter(c => c.status === 'concluido' || c.status === 'arquivado') }
   ];
 
   const formatDate = (date: Date) => {
@@ -81,7 +81,7 @@ export default function Casos() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Casos</h1>
+          <h1 className="text-2xl font-bold text-foreground">Ocorrências</h1>
           <p className="text-muted-foreground">Gerencie investigações de fraude</p>
         </div>
         <Button className="w-fit">
@@ -109,10 +109,10 @@ export default function Casos() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos os Status</SelectItem>
-                <SelectItem value="aberto">Aberto</SelectItem>
+                <SelectItem value="aberto">Ocorrência</SelectItem>
                 <SelectItem value="em_analise">Em Análise</SelectItem>
-                <SelectItem value="pendente_resposta">Aguardando</SelectItem>
-                <SelectItem value="concluido">Concluído</SelectItem>
+                <SelectItem value="pendente_resposta">Não Fraude</SelectItem>
+                <SelectItem value="concluido">Fraude</SelectItem>
               </SelectContent>
             </Select>
             <Select value={selectedPriority} onValueChange={setSelectedPriority}>
