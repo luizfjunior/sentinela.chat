@@ -3,10 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSupabaseConversations } from "@/hooks/useSupabaseConversations";
 import ChatMessage from "../components/ChatMessage";
 import ChatInput from "../components/ChatInput";
-import Sidebar from "../components/Sidebar";
-import UserProfile from "../components/UserProfile";
 import { toast } from "sonner";
-import { useSidebar } from "../hooks/useSidebar";
 
 interface Message {
   id: string;
@@ -16,13 +13,12 @@ interface Message {
   isPending?: boolean; // for messages not yet saved to Supabase
 }
 
-const Index = () => {
+const Chat = () => {
   const { user, profile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastGeneratedMessageId, setLastGeneratedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const sidebar = useSidebar();
 
   const {
     conversations,
@@ -65,14 +61,12 @@ const Index = () => {
     setCurrentConversationId(null);
     setMessages([]);
     setLastGeneratedMessageId(null);
-    sidebar.close();
   };
 
   const handleSelectConversation = (id: string) => {
     setCurrentConversationId(id);
     setMessages([]);
     setLastGeneratedMessageId(null);
-    sidebar.close();
   };
 
   const handleDeleteConversation = (id: string) => {
@@ -297,37 +291,13 @@ const Index = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#0f1218] text-gray-900 dark:text-white">
-      {/* Sidebar */}
-      <Sidebar 
-        isOpen={sidebar.isOpen}
-        onToggle={sidebar.toggle}
-        conversations={conversations}
-        currentConversationId={currentConversationId}
-        onNewChat={handleNewChat}
-        onSelectConversation={handleSelectConversation}
-        onDeleteConversation={handleDeleteConversation}
-        onRenameConversation={handleRenameConversation}
-      />
-      {/* Header */}
-      <header className="sticky top-0 z-10 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 bg-zinc-700">
-        <div className="max-w-4xl mx-auto flex items-center justify-between px-0 py-[13px]">
-          <div className="flex items-center gap-3 ml-12">
-            <img 
-              alt="Grupo Oscar Logo" 
-              src="/lovable-uploads/8d123358-879a-4bd0-8c59-94020f57ed0c.jpg" 
-              className="mix-blend-screen w-24 h-auto mx-auto object-fill" 
-            />
-          </div>
-          <UserProfile />
-        </div>
-      </header>
+    <div className="flex flex-col h-full bg-background">
       {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto bg-zinc-900">
+      <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-4 flex flex-col h-full">
           {messages.length === 0 ? (
             <div className="flex flex-1 items-center justify-center">
-              <span className="text-xl text-slate-200 font-medium">
+              <span className="text-xl text-muted-foreground font-medium">
                 Bem-vindo ao Agente Anti-Fraude!
               </span>
             </div>
@@ -362,7 +332,7 @@ const Index = () => {
         </div>
       </div>
       {/* Chat Input */}
-      <div className="sticky bottom-0 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 bg-zinc-700">
+      <div className="border-t border-border bg-card">
         <div className="max-w-4xl mx-auto px-4 py-4">
           <ChatInput 
             onSendMessage={handleSendMessage} 
@@ -376,4 +346,4 @@ const Index = () => {
   );
 };
 
-export default Index;
+export default Chat;

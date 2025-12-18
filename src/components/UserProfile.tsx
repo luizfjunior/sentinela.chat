@@ -1,12 +1,15 @@
-
-import { useState } from "react";
-import { User, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/contexts/AuthContext";
+import { cn } from "@/lib/utils";
 
-const UserProfile = () => {
+interface UserProfileProps {
+  collapsed?: boolean;
+}
+
+const UserProfile = ({ collapsed = false }: UserProfileProps) => {
   const { user, profile, signOut } = useAuth();
   
   const userEmail = user?.email || profile?.email || "usuario@grupooscar.com";
@@ -20,23 +23,32 @@ const UserProfile = () => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="h-8 w-8 rounded-full p-0">
-          <Avatar className="h-8 w-8">
-            <AvatarFallback className="bg-zinc-600 text-white text-xs">
+        <Button variant="ghost" className={cn(
+          "rounded-full p-0",
+          collapsed ? "h-10 w-10" : "h-auto w-full justify-start gap-3 px-2 py-2"
+        )}>
+          <Avatar className={cn(collapsed ? "h-10 w-10" : "h-8 w-8")}>
+            <AvatarFallback className="bg-primary/20 text-primary text-xs">
               {initials}
             </AvatarFallback>
           </Avatar>
+          {!collapsed && (
+            <div className="flex flex-col items-start text-left">
+              <span className="text-sm font-medium text-foreground truncate max-w-[140px]">{userName}</span>
+              <span className="text-xs text-muted-foreground truncate max-w-[140px]">{userEmail}</span>
+            </div>
+          )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56 bg-zinc-800 border-zinc-700">
+      <DropdownMenuContent align="end" className="w-56 bg-card border-border">
         <div className="px-3 py-2">
-          <p className="text-sm text-white font-medium">{userName}</p>
-          <p className="text-xs text-zinc-400">{userEmail}</p>
+          <p className="text-sm text-foreground font-medium">{userName}</p>
+          <p className="text-xs text-muted-foreground">{userEmail}</p>
         </div>
-        <DropdownMenuSeparator className="bg-zinc-700" />
+        <DropdownMenuSeparator className="bg-border" />
         <DropdownMenuItem
           onClick={handleLogout}
-          className="text-white hover:bg-zinc-700 cursor-pointer"
+          className="text-foreground hover:bg-accent cursor-pointer"
         >
           <LogOut className="h-4 w-4 mr-2" />
           Terminar Sessão

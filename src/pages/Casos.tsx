@@ -1,0 +1,217 @@
+import { useState } from "react";
+import { Plus, Search, LayoutGrid, List, AlertTriangle, Calendar, User } from "lucide-react";
+import { mockCases, Case } from "@/data/mockData";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { PriorityBadge } from "@/components/shared/PriorityBadge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { cn } from "@/lib/utils";
+
+export default function Casos() {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedStatus, setSelectedStatus] = useState<string>("all");
+  const [selectedPriority, setSelectedPriority] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
+
+  const filteredCases = mockCases.filter(caso => {
+    const matchesSearch = caso.titulo.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         caso.descricao.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         caso.lojaNome.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = selectedStatus === "all" || caso.status === selectedStatus;
+    const matchesPriority = selectedPriority === "all" || caso.prioridade === selectedPriority;
+    
+    return matchesSearch && matchesStatus && matchesPriority;
+  });
+
+  const kanbanColumns = [
+    { id: 'aberto', title: 'Aberto', cases: filteredCases.filter(c => c.status === 'aberto') },
+    { id: 'em_analise', title: 'Em Análise', cases: filteredCases.filter(c => c.status === 'em_analise') },
+    { id: 'pendente_resposta', title: 'Aguardando', cases: filteredCases.filter(c => c.status === 'pendente_resposta') },
+    { id: 'concluido', title: 'Concluído', cases: filteredCases.filter(c => c.status === 'concluido' || c.status === 'arquivado') }
+  ];
+
+  const formatDate = (date: Date) => {
+    return format(date, "dd/MM/yyyy", { locale: ptBR });
+  };
+
+  const CaseCard = ({ caso }: { caso: Case }) => (
+    <Card className="bg-background border-border hover:border-primary/50 transition-colors cursor-pointer">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="text-sm font-medium text-foreground line-clamp-2">{caso.titulo}</h3>
+          <PriorityBadge prioridade={caso.prioridade} />
+        </div>
+        <p className="text-xs text-muted-foreground line-clamp-2">{caso.descricao}</p>
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            {caso.alertasVinculados} alertas
+          </span>
+          <span className="flex items-center gap-1">
+            <Calendar className="h-3 w-3" />
+            {formatDate(caso.createdAt)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between pt-2 border-t border-border">
+          <span className="text-xs text-muted-foreground">{caso.lojaNome}</span>
+          <span className="text-xs font-medium text-primary">
+            R$ {caso.valorTotalEnvolvido.toFixed(2)}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <User className="h-3 w-3" />
+          {caso.responsavel}
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Casos</h1>
+          <p className="text-muted-foreground">Gerencie investigações de fraude</p>
+        </div>
+        <Button className="w-fit">
+          <Plus className="h-4 w-4 mr-2" />
+          Novo Caso
+        </Button>
+      </div>
+
+      {/* Filters */}
+      <Card className="bg-card border-border">
+        <CardContent className="pt-4">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar casos..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 bg-background border-border"
+              />
+            </div>
+            <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+              <SelectTrigger className="w-full sm:w-[180px] bg-background border-border">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os Status</SelectItem>
+                <SelectItem value="aberto">Aberto</SelectItem>
+                <SelectItem value="em_analise">Em Análise</SelectItem>
+                <SelectItem value="pendente_resposta">Aguardando</SelectItem>
+                <SelectItem value="concluido">Concluído</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={selectedPriority} onValueChange={setSelectedPriority}>
+              <SelectTrigger className="w-full sm:w-[180px] bg-background border-border">
+                <SelectValue placeholder="Prioridade" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                <SelectItem value="urgente">Urgente</SelectItem>
+                <SelectItem value="alta">Alta</SelectItem>
+                <SelectItem value="media">Média</SelectItem>
+                <SelectItem value="baixa">Baixa</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex gap-1 border border-border rounded-md p-1">
+              <Button
+                variant={viewMode === "kanban" ? "secondary" : "ghost"}
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setViewMode("kanban")}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={viewMode === "list" ? "secondary" : "ghost"}
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setViewMode("list")}
+              >
+                <List className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Kanban View */}
+      {viewMode === "kanban" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {kanbanColumns.map((column) => (
+            <div key={column.id} className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-foreground">{column.title}</h3>
+                <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded">
+                  {column.cases.length}
+                </span>
+              </div>
+              <div className="space-y-3 min-h-[200px] bg-secondary/30 rounded-lg p-2">
+                {column.cases.map((caso) => (
+                  <CaseCard key={caso.id} caso={caso} />
+                ))}
+                {column.cases.length === 0 && (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    Nenhum caso
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* List View */}
+      {viewMode === "list" && (
+        <div className="space-y-3">
+          {filteredCases.map((caso) => (
+            <Card key={caso.id} className="bg-card border-border hover:border-primary/50 transition-colors cursor-pointer">
+              <CardContent className="p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-medium text-foreground">{caso.titulo}</h3>
+                      <PriorityBadge prioridade={caso.prioridade} />
+                      <StatusBadge status={caso.status} />
+                    </div>
+                    <p className="text-sm text-muted-foreground">{caso.descricao}</p>
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      <span>{caso.lojaNome}</span>
+                      <span>{caso.alertasVinculados} alertas vinculados</span>
+                      <span>Criado em {formatDate(caso.createdAt)}</span>
+                      <span>Responsável: {caso.responsavel}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-lg font-bold text-primary">
+                      R$ {caso.valorTotalEnvolvido.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {filteredCases.length === 0 && (
+            <div className="py-12 text-center text-muted-foreground">
+              Nenhum caso encontrado com os filtros selecionados
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
