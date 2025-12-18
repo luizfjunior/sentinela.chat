@@ -2,10 +2,8 @@ import { NavLink, useLocation } from "react-router-dom";
 import { 
   LayoutDashboard, 
   MessageSquare, 
-  AlertTriangle, 
+  Search, 
   FolderOpen, 
-  FileText, 
-  Settings,
   Shield,
   ChevronLeft,
   ChevronRight
@@ -32,26 +30,15 @@ const navItems = [
     icon: MessageSquare 
   },
   { 
-    title: "Alertas", 
+    title: "Análises", 
     url: "/alertas", 
-    icon: AlertTriangle,
-    badge: 4
+    icon: Search
   },
   { 
     title: "Casos", 
     url: "/casos", 
     icon: FolderOpen,
     badge: 3
-  },
-  { 
-    title: "Relatórios", 
-    url: "/relatorios", 
-    icon: FileText 
-  },
-  { 
-    title: "Configurações", 
-    url: "/configuracoes", 
-    icon: Settings 
   }
 ];
 
