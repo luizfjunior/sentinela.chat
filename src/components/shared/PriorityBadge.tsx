@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
 interface PriorityBadgeProps {
-  prioridade: 'baixo' | 'medio' | 'crítico';
+  prioridade: 'baixo' | 'médio' | 'crítico';
   className?: string;
 }
 
@@ -10,7 +10,7 @@ const prioridadeConfig = {
     label: 'Baixo',
     className: 'bg-blue-500/10 text-blue-500 border-blue-500/20'
   },
-  medio: {
+  'médio': {
     label: 'Médio',
     className: 'bg-amber-500/10 text-amber-500 border-amber-500/20'
   },
