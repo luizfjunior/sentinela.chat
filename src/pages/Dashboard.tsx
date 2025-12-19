@@ -216,7 +216,7 @@ export default function Dashboard() {
                     className="w-3 h-3 rounded-full" 
                     style={{ backgroundColor: item.color }} 
                   />
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-slate-200">
                     {item.name}: {item.value} (R$ {item.total.toFixed(2)})
                   </span>
                 </div>
