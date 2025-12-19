@@ -28,7 +28,7 @@ export default function Casos() {
     titulo: "",
     descricao: "",
     loja: "",
-    prioridade: "media" as Case['prioridade'],
+    prioridade: "médio" as Case['prioridade'],
     valorEnvolvido: ""
   });
 
@@ -61,7 +61,7 @@ export default function Casos() {
       titulo: "",
       descricao: "",
       loja: "",
-      prioridade: "media",
+      prioridade: "médio",
       valorEnvolvido: ""
     });
     setIsModalOpen(false);
@@ -219,10 +219,9 @@ export default function Casos() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="baixa">Baixa</SelectItem>
-                    <SelectItem value="media">Média</SelectItem>
-                    <SelectItem value="alta">Alta</SelectItem>
-                    <SelectItem value="urgente">Urgente</SelectItem>
+                    <SelectItem value="baixo">Baixo</SelectItem>
+                    <SelectItem value="médio">Médio</SelectItem>
+                    <SelectItem value="crítico">Crítico</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -276,10 +275,9 @@ export default function Casos() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas</SelectItem>
-                <SelectItem value="urgente">Urgente</SelectItem>
-                <SelectItem value="alta">Alta</SelectItem>
-                <SelectItem value="media">Média</SelectItem>
-                <SelectItem value="baixa">Baixa</SelectItem>
+                <SelectItem value="crítico">Crítico</SelectItem>
+                <SelectItem value="médio">Médio</SelectItem>
+                <SelectItem value="baixo">Baixo</SelectItem>
               </SelectContent>
             </Select>
             <div className="flex gap-1 border border-border rounded-md p-1">
