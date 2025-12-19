@@ -21,7 +21,7 @@ const prioridadeConfig = {
 };
 
 export function PriorityBadge({ prioridade, className }: PriorityBadgeProps) {
-  const config = prioridadeConfig[prioridade];
+  const config = prioridadeConfig[prioridade] || prioridadeConfig['baixo'];
   
   return (
     <span className={cn(
