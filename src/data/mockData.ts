@@ -5,7 +5,7 @@ export interface Alert {
   lojaId: string;
   lojaNome: string;
   tipo: 'troca' | 'ajuste' | 'cancelamento' | 'cruzamento';
-  nivelRisco: 'leve' | 'medio' | 'critico';
+  nivelRisco: 'baixo' | 'médio' | 'crítico';
   status: 'pendente' | 'em_analise' | 'resolvido' | 'falso_positivo';
   titulo: string;
   descricao: string;
@@ -21,7 +21,7 @@ export interface Case {
   titulo: string;
   descricao: string;
   status: 'aberto' | 'em_analise' | 'pendente_resposta' | 'concluido' | 'arquivado';
-  prioridade: 'baixa' | 'media' | 'alta' | 'urgente';
+  prioridade: 'baixo' | 'médio' | 'crítico';
   lojaId: string;
   lojaNome: string;
   alertasVinculados: number;
@@ -115,7 +115,7 @@ export const mockAlerts: Alert[] = [
     lojaId: 'loja-002',
     lojaNome: 'Loja Shopping',
     tipo: 'troca',
-    nivelRisco: 'leve',
+    nivelRisco: 'baixo',
     status: 'resolvido',
     titulo: 'Troca mesma marca com diferença',
     descricao: 'Troca normal dentro das regras',
@@ -144,7 +144,7 @@ export const mockAlerts: Alert[] = [
     lojaId: 'loja-001',
     lojaNome: 'Loja Centro',
     tipo: 'troca',
-    nivelRisco: 'leve',
+    nivelRisco: 'baixo',
     status: 'resolvido',
     titulo: 'Troca padrão aprovada',
     descricao: 'Troca dentro do prazo e condições normais',
@@ -163,7 +163,7 @@ export const mockCases: Case[] = [
     titulo: 'Investigação Loja Centro - Padrão de Fraude',
     descricao: 'Múltiplos alertas críticos identificados na Loja Centro nas últimas 48h',
     status: 'em_analise',
-    prioridade: 'urgente',
+    prioridade: 'crítico',
     lojaId: 'loja-001',
     lojaNome: 'Loja Centro',
     alertasVinculados: 3,
@@ -176,7 +176,7 @@ export const mockCases: Case[] = [
     titulo: 'Cruzamento Loja Norte x Sul',
     descricao: 'Análise de produtos que faltaram em uma loja e apareceram em outra',
     status: 'aberto',
-    prioridade: 'alta',
+    prioridade: 'crítico',
     lojaId: 'loja-003',
     lojaNome: 'Loja Norte',
     alertasVinculados: 2,
@@ -189,7 +189,7 @@ export const mockCases: Case[] = [
     titulo: 'Ajustes suspeitos Shopping',
     descricao: 'Padrão de ajustes entrada/saída sequenciais identificado',
     status: 'pendente_resposta',
-    prioridade: 'media',
+    prioridade: 'medio',
     lojaId: 'loja-002',
     lojaNome: 'Loja Shopping',
     alertasVinculados: 1,
@@ -202,7 +202,7 @@ export const mockCases: Case[] = [
     titulo: 'Cancelamentos antigos com saída',
     descricao: 'Produtos cancelados tiveram saída de inventário posteriormente',
     status: 'concluido',
-    prioridade: 'baixa',
+    prioridade: 'baixo',
     lojaId: 'loja-001',
     lojaNome: 'Loja Centro',
     alertasVinculados: 1,
@@ -242,7 +242,7 @@ export const alertsByStoreData = [
 export const riskDistributionData = [
   { name: 'Crítico', value: 4, color: '#ef4444' },
   { name: 'Médio', value: 2, color: '#f59e0b' },
-  { name: 'Leve', value: 2, color: '#22c55e' }
+  { name: 'Baixo', value: 2, color: '#3b82f6' }
 ];
 
 export const alertsTrendData = [

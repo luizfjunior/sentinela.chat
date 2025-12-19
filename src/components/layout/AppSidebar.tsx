@@ -4,9 +4,9 @@ import {
   MessageSquare, 
   Search, 
   FolderOpen, 
-  Shield,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  UserCog
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,11 @@ const navItems = [
     url: "/casos", 
     icon: FolderOpen,
     badge: 3
+  },
+  { 
+    title: "Admin", 
+    url: "/admin", 
+    icon: UserCog
   }
 ];
 
@@ -55,13 +60,7 @@ export function AppSidebar({ isCollapsed, onToggle }: AppSidebarProps) {
       {/* Header */}
       <div className="h-16 flex items-center justify-between px-4 border-b border-border">
         {!isCollapsed && (
-          <div className="flex items-center gap-2">
-            <Shield className="h-7 w-7 text-primary" />
-            <span className="font-bold text-lg text-foreground">SENTINELA</span>
-          </div>
-        )}
-        {isCollapsed && (
-          <Shield className="h-7 w-7 text-primary mx-auto" />
+          <span className="font-bold text-lg text-foreground tracking-wider">SENTINELA</span>
         )}
         <Button 
           variant="ghost" 

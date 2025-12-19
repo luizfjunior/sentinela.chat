@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import Chat from "./pages/Chat";
 import Alertas from "./pages/Alertas";
 import Casos from "./pages/Casos";
+import Admin from "./pages/Admin";
 import Configuracoes from "./pages/Configuracoes";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
@@ -37,6 +38,7 @@ const App = () => (
               <Route path="chat" element={<Chat />} />
               <Route path="alertas" element={<Alertas />} />
               <Route path="casos" element={<Casos />} />
+              <Route path="admin" element={<Admin />} />
               <Route path="configuracoes" element={<Configuracoes />} />
             </Route>
             <Route path="*" element={<NotFound />} />

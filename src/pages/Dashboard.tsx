@@ -1,15 +1,7 @@
-import { AlertTriangle, FolderOpen, TrendingUp, CheckCircle, Store, Clock } from "lucide-react";
+import { TrendingUp, Store, Clock, AlertTriangle } from "lucide-react";
 import { StatCard } from "@/components/dashboard/StatCard";
-import { AlertBadge } from "@/components/shared/AlertBadge";
-import { StatusBadge } from "@/components/shared/StatusBadge";
-import { 
-  mockKPIs, 
-  alertsByStoreData, 
-  riskDistributionData, 
-  alertsTrendData,
-  mockAlerts,
-  mockCases 
-} from "@/data/mockData";
+import { PriorityBadge } from "@/components/shared/PriorityBadge";
+import { mockCases, Case } from "@/data/mockData";
 import { 
   BarChart, 
   Bar, 
@@ -22,16 +14,94 @@ import {
   Pie,
   Cell,
   LineChart,
-  Line
+  Line,
+  LabelList
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useMemo } from "react";
 
 export default function Dashboard() {
   const today = format(new Date(), "EEEE, d 'de' MMMM", { locale: ptBR });
-  const recentAlerts = mockAlerts.filter(a => a.status === 'pendente').slice(0, 5);
-  const recentCases = mockCases.filter(c => c.status !== 'concluido' && c.status !== 'arquivado').slice(0, 4);
+
+  const riskStats = useMemo(() => {
+    const baixo = mockCases.filter(c => c.prioridade === 'baixo');
+    const medio = mockCases.filter(c => c.prioridade === 'médio');
+    const critico = mockCases.filter(c => c.prioridade === 'crítico');
+
+    return {
+      baixo: {
+        count: baixo.length,
+        total: baixo.reduce((acc, c) => acc + c.valorTotalEnvolvido, 0)
+      },
+      medio: {
+        count: medio.length,
+        total: medio.reduce((acc, c) => acc + c.valorTotalEnvolvido, 0)
+      },
+      critico: {
+        count: critico.length,
+        total: critico.reduce((acc, c) => acc + c.valorTotalEnvolvido, 0)
+      },
+      totalGeral: mockCases.reduce((acc, c) => acc + c.valorTotalEnvolvido, 0),
+      totalCount: mockCases.length
+    };
+  }, []);
+
+  const ocorrenciasPorLoja = useMemo(() => {
+    const lojaMap = new Map<string, { total: number; criticos: number }>();
+    
+    mockCases.forEach(c => {
+      const current = lojaMap.get(c.lojaNome) || { total: 0, criticos: 0 };
+      current.total += 1;
+      if (c.prioridade === 'crítico') current.criticos += 1;
+      lojaMap.set(c.lojaNome, current);
+    });
+
+    return Array.from(lojaMap.entries()).map(([loja, data]) => ({
+      loja: loja.replace('Loja ', ''),
+      ocorrencias: data.total,
+      criticos: data.criticos
+    }));
+  }, []);
+
+  const riskDistributionData = useMemo(() => [
+    { name: 'Crítico', value: riskStats.critico.count, total: riskStats.critico.total, color: '#ef4444' },
+    { name: 'Médio', value: riskStats.medio.count, total: riskStats.medio.total, color: '#f59e0b' },
+    { name: 'Baixo', value: riskStats.baixo.count, total: riskStats.baixo.total, color: '#3b82f6' }
+  ], [riskStats]);
+
+  const tendenciaOcorrencias = useMemo(() => {
+    const last30Days: { [key: string]: { baixo: number; medio: number; critico: number } } = {};
+    
+    for (let i = 29; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateKey = format(date, 'dd/MM');
+      last30Days[dateKey] = { baixo: 0, medio: 0, critico: 0 };
+    }
+
+    mockCases.forEach(c => {
+      const dateKey = format(c.createdAt, 'dd/MM');
+      if (last30Days[dateKey]) {
+        if (c.prioridade === 'baixo') last30Days[dateKey].baixo += 1;
+        else if (c.prioridade === 'médio') last30Days[dateKey].medio += 1;
+        else if (c.prioridade === 'crítico') last30Days[dateKey].critico += 1;
+      }
+    });
+
+    return Object.entries(last30Days).map(([data, values]) => ({
+      data,
+      ...values,
+      total: values.baixo + values.medio + values.critico
+    }));
+  }, []);
+
+  const recentOcorrencias = useMemo(() => {
+    return [...mockCases]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 5);
+  }, []);
 
   return (
     <div className="p-6 space-y-6">
@@ -41,52 +111,51 @@ export default function Dashboard() {
         <p className="text-muted-foreground capitalize">{today}</p>
       </div>
 
-      {/* KPI Cards */}
+      {/* KPI Cards - Total por Risco */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Total de Alertas"
-          value={mockKPIs.totalAlertasHoje}
-          subtitle="Hoje"
+          title="Risco Baixo"
+          value={riskStats.baixo.count}
+          subtitle={`R$ ${riskStats.baixo.total.toFixed(2)}`}
           icon={AlertTriangle}
-          trend={{ value: 12, isPositive: false }}
+          variant="default"
         />
         <StatCard
-          title="Alertas Críticos"
-          value={mockKPIs.alertasCriticos}
-          subtitle="Requerem atenção imediata"
+          title="Risco Médio"
+          value={riskStats.medio.count}
+          subtitle={`R$ ${riskStats.medio.total.toFixed(2)}`}
+          icon={AlertTriangle}
+          variant="warning"
+        />
+        <StatCard
+          title="Risco Crítico"
+          value={riskStats.critico.count}
+          subtitle={`R$ ${riskStats.critico.total.toFixed(2)}`}
           icon={AlertTriangle}
           variant="danger"
         />
         <StatCard
-          title="Casos em Aberto"
-          value={mockKPIs.casosAbertos}
-          subtitle="Investigações ativas"
-          icon={FolderOpen}
-          variant="warning"
-        />
-        <StatCard
-          title="Taxa de Resolução"
-          value={`${mockKPIs.taxaResolucao}%`}
-          subtitle="Últimos 30 dias"
-          icon={CheckCircle}
+          title="Total Geral"
+          value={riskStats.totalCount}
+          subtitle={`R$ ${riskStats.totalGeral.toFixed(2)}`}
+          icon={TrendingUp}
           variant="success"
-          trend={{ value: 5, isPositive: true }}
         />
       </div>
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Alerts by Store */}
+        {/* Ocorrências por Loja */}
         <Card className="lg:col-span-2 bg-card border-border">
           <CardHeader>
             <CardTitle className="text-foreground flex items-center gap-2">
               <Store className="h-5 w-5" />
-              Alertas por Loja (últimos 7 dias)
+              Ocorrências por Loja
             </CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={alertsByStoreData}>
+              <BarChart data={ocorrenciasPorLoja}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" />
                 <XAxis dataKey="loja" stroke="#888" fontSize={12} />
                 <YAxis stroke="#888" fontSize={12} />
@@ -97,14 +166,14 @@ export default function Dashboard() {
                     borderRadius: '8px'
                   }}
                 />
-                <Bar dataKey="alertas" fill="#3b82f6" name="Total" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="ocorrencias" fill="#3b82f6" name="Total" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="criticos" fill="#ef4444" name="Críticos" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {/* Risk Distribution */}
+        {/* Risk Distribution com valores */}
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-foreground">Distribuição por Risco</CardTitle>
@@ -120,6 +189,8 @@ export default function Dashboard() {
                   outerRadius={80}
                   paddingAngle={5}
                   dataKey="value"
+                  label={({ name, value }) => `${value}`}
+                  labelLine={false}
                 >
                   {riskDistributionData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
@@ -131,6 +202,10 @@ export default function Dashboard() {
                     border: '1px solid #333',
                     borderRadius: '8px'
                   }}
+                  formatter={(value: number, name: string, props: any) => [
+                    `${value} ocorrências (R$ ${props.payload.total.toFixed(2)})`,
+                    name
+                  ]}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -141,7 +216,9 @@ export default function Dashboard() {
                     className="w-3 h-3 rounded-full" 
                     style={{ backgroundColor: item.color }} 
                   />
-                  <span className="text-xs text-muted-foreground">{item.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {item.name}: {item.value} (R$ {item.total.toFixed(2)})
+                  </span>
                 </div>
               ))}
             </div>
@@ -149,19 +226,19 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {/* Trend Chart */}
+      {/* Trend Chart - Tendência de Ocorrências */}
       <Card className="bg-card border-border">
         <CardHeader>
           <CardTitle className="text-foreground flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
-            Tendência de Alertas (últimos 30 dias)
+            Tendência de Ocorrências (últimos 30 dias)
           </CardTitle>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={alertsTrendData}>
+            <LineChart data={tendenciaOcorrencias}>
               <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-              <XAxis dataKey="data" stroke="#888" fontSize={11} />
+              <XAxis dataKey="data" stroke="#888" fontSize={11} interval={4} />
               <YAxis stroke="#888" fontSize={12} />
               <Tooltip 
                 contentStyle={{ 
@@ -172,74 +249,63 @@ export default function Dashboard() {
               />
               <Line 
                 type="monotone" 
-                dataKey="alertas" 
+                dataKey="critico" 
+                stroke="#ef4444" 
+                strokeWidth={2}
+                name="Crítico"
+                dot={{ fill: '#ef4444', strokeWidth: 0, r: 2 }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="medio" 
+                stroke="#f59e0b" 
+                strokeWidth={2}
+                name="Médio"
+                dot={{ fill: '#f59e0b', strokeWidth: 0, r: 2 }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="baixo" 
                 stroke="#3b82f6" 
                 strokeWidth={2}
-                dot={{ fill: '#3b82f6', strokeWidth: 0, r: 3 }}
-                activeDot={{ r: 5 }}
+                name="Baixo"
+                dot={{ fill: '#3b82f6', strokeWidth: 0, r: 2 }}
               />
             </LineChart>
           </ResponsiveContainer>
         </CardContent>
       </Card>
 
-      {/* Recent Alerts and Cases */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Recent Critical Alerts */}
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-foreground flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-red-500" />
-              Alertas Recentes Pendentes
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {recentAlerts.map((alert) => (
-              <div 
-                key={alert.id} 
-                className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{alert.titulo}</p>
-                  <p className="text-xs text-muted-foreground">{alert.lojaNome}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <AlertBadge nivel={alert.nivelRisco} />
-                  <span className="text-xs text-muted-foreground">
-                    R$ {alert.valorEnvolvido.toFixed(2)}
-                  </span>
-                </div>
+      {/* Ocorrências Recentes */}
+      <Card className="bg-card border-border">
+        <CardHeader>
+          <CardTitle className="text-foreground flex items-center gap-2">
+            <Clock className="h-5 w-5 text-amber-500" />
+            Ocorrências Recentes
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {recentOcorrencias.map((caso) => (
+            <div 
+              key={caso.id} 
+              className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{caso.titulo}</p>
+                <p className="text-xs text-muted-foreground">
+                  {caso.lojaNome} • {format(caso.createdAt, "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                </p>
               </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        {/* Recent Cases */}
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-foreground flex items-center gap-2">
-              <Clock className="h-5 w-5 text-amber-500" />
-              Casos em Andamento
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {recentCases.map((caso) => (
-              <div 
-                key={caso.id} 
-                className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{caso.titulo}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {caso.lojaNome} • {caso.alertasVinculados} alertas
-                  </p>
-                </div>
-                <StatusBadge status={caso.status} />
+              <div className="flex items-center gap-3">
+                <PriorityBadge prioridade={caso.prioridade} />
+                <span className="text-sm font-medium text-primary">
+                  R$ {caso.valorTotalEnvolvido.toFixed(2)}
+                </span>
               </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
     </div>
   );
 }

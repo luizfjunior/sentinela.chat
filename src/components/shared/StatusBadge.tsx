@@ -7,7 +7,7 @@ interface StatusBadgeProps {
 
 const statusConfig: Record<string, { label: string; className: string }> = {
   pendente: {
-    label: 'Pendente',
+    label: 'Ocorrência',
     className: 'bg-amber-500/10 text-amber-500 border-amber-500/20'
   },
   em_analise: {
@@ -15,7 +15,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
     className: 'bg-blue-500/10 text-blue-500 border-blue-500/20'
   },
   resolvido: {
-    label: 'Resolvido',
+    label: 'Ocorrência',
     className: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
   },
   falso_positivo: {
@@ -35,7 +35,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
     className: 'bg-red-500/10 text-red-500 border-red-500/20'
   },
   arquivado: {
-    label: 'Arquivado',
+    label: 'Não Fraude',
     className: 'bg-gray-500/10 text-gray-400 border-gray-500/20'
   }
 };
