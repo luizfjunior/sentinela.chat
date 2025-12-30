@@ -1,0 +1,68 @@
+# Ambiente Virtual
+.venv/
+venv/
+env/
+ENV/
+
+# Arquivos Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Banco de Dados
+*.db
+*.sqlite
+*.sqlite3
+data/sentinela.db
+
+# Variáveis de Ambiente (IMPORTANTE!)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema Operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Dados sensíveis
+data/*.csv
+data/*.xlsx
+data/*.xls
+
+# Temporários
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Distribuição
+dist/
+build/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json

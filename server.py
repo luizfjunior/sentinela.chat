@@ -26,14 +26,14 @@ def ensure_api_key():
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if key:
         return
-    print("🔑 OPENAI_API_KEY não encontrada.")
+    print("OPENAI_API_KEY nao encontrada.")
     print("Cole sua chave da OpenAI (entrada oculta):")
     key = getpass.getpass("> ").strip()
     if not key:
         print("Erro: chave vazia. Abandonando.")
         sys.exit(1)
     os.environ["OPENAI_API_KEY"] = key
-    print("✅ Chave configurada neste processo.")
+    print("Chave configurada neste processo.")
 
 def _input_default(prompt: str, default: str) -> str:
     """
@@ -48,7 +48,7 @@ def prompt_model_config():
     As variáveis são salvas no ambiente do processo (não persistem fora).
     A entrada da FREE_API_KEY fica COMENTADA por padrão, como você pediu.
     """
-    print("\n⚙️  Configuração de modelos (ENTER mantém o padrão atual)\n")
+    print("\nConfiguracao de modelos (ENTER mantem o padrao atual)\n")
 
     # -------- PRIMARY --------
     curr_primary = os.environ.get("PRIMARY_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
@@ -73,9 +73,9 @@ def prompt_model_config():
 
         # apenas avisa se já havia key no ambiente
         if os.environ.get("FREE_API_KEY"):
-            print("✅ FREE_API_KEY já está definida no ambiente.")
+            print("FREE_API_KEY ja esta definida no ambiente.")
         else:
-            print("ℹ️  FREE_API_KEY não definida aqui (ok para testes se já estiver no ambiente do Windows).")
+            print("FREE_API_KEY nao definida aqui (ok para testes se ja estiver no ambiente do Windows).")
     else:
         # Se usuário optar por não usar free, limpamos as variáveis no processo
         os.environ.pop("FREE_MODEL_ID", None)
@@ -120,7 +120,7 @@ def main():
     else:
         urls.append(f"http://{args.host}:{args.port}")
 
-    print("\n🚀 Sentinela iniciando…")
+    print("\nSentinela iniciando...")
     for u in urls:
         print(f"• UI (Chat):   {u}/")
         print(f"• Swagger:     {u}/docs")

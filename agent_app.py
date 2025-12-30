@@ -1,9 +1,15 @@
 # agent_app.py
-# Sentinela – Chat + Tools (SQLite/CSV) com planner, roteamento e UI
-# Requisitos principais: fastapi, uvicorn, agno, pydantic, pandas, numpy, markdown, starlette
+# Sentinela – Chat + Tools (PostgreSQL Data Mart) com planner, roteamento e UI
+# Requisitos principais: fastapi, uvicorn, agno, pydantic, pandas, numpy, markdown, starlette, psycopg
 
 import os, traceback
+import sys
+
 from typing import Any, Dict, Optional, Literal
+from dotenv import load_dotenv
+
+# Carrega variáveis do arquivo .env (override=True força o .env a sobrescrever variáveis de ambiente)
+load_dotenv(override=True)
 import numpy as np
 import pandas as pd
 import re, unicodedata
@@ -14,6 +20,7 @@ from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Response
 from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 import time
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -25,13 +32,28 @@ import html
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from agno.tools import tool
-import sqlite3, tempfile, shutil, pathlib
+import psycopg
+from psycopg.rows import dict_row
 import markdown
 
 # =========================
 # App & rotas básicas
 # =========================
 app = FastAPI(title="Sentinela")
+
+# CORS - permite requisições do frontend React (Vite)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",      # Vite dev server
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def _missing_key_banner() -> str:
     return (
@@ -65,6 +87,28 @@ async def app_lifespan(app):
     if not os.environ.get("OPENAI_API_KEY"):
         print(_missing_key_banner(), flush=True)
         raise RuntimeError("OPENAI_API_KEY ausente")
+
+    # Verifica conexão PostgreSQL
+    try:
+        print("[*] Conectando ao PostgreSQL Data Mart...", flush=True)
+        print(f"[*] Host: {DB_HOST}:{DB_PORT} | Database: {DB_NAME}", flush=True)
+        conn = _get_pg_connection()
+        conn.close()
+        print("[OK] Conexao com PostgreSQL estabelecida!", flush=True)
+    except Exception as e:
+        print(f"[ERRO] Erro ao conectar ao PostgreSQL: {e}", flush=True)
+        print("[AVISO] Verifique as variaveis DB_* no arquivo .env", flush=True)
+        raise RuntimeError(f"Falha na conexao com PostgreSQL: {e}")
+
+    # Constrói catálogo de tabelas
+    try:
+        print("[*] Construindo catalogo de tabelas...", flush=True)
+        rebuild_catalog()
+        tables = list(CATALOG.keys())
+        print(f"[OK] Catalogo construido! Tabelas disponiveis: {', '.join(tables)}", flush=True)
+    except Exception as e:
+        print(f"[AVISO] Erro ao construir catalogo: {e}", flush=True)
+
     yield
 
 app.router.lifespan_context = app_lifespan
@@ -137,10 +181,25 @@ def free_health():
         return {"ok": False, "error": str(e)}
 
 # =========================
-# Constantes
+# Constantes e Configuração do Banco
 # =========================
 DATA_DIR = os.environ.get("DATA_DIR", "data")
-DB_PATH  = os.path.join(DATA_DIR, "sentinela.db")
+DB_PATH  = os.path.join(DATA_DIR, "sentinela.db")  # Mantido para compatibilidade, mas não usado
+
+# PostgreSQL Configuration
+DB_HOST = os.environ.get("DB_HOST", "localhost")
+DB_PORT = os.environ.get("DB_PORT", "5432")
+DB_NAME = os.environ.get("DB_NAME", "estoque")
+DB_USER = os.environ.get("DB_USER", "postgres")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
+DB_SCHEMA = os.environ.get("DB_SCHEMA", "sentinela")
+
+# Connection String (usa variável ou constrói)
+POSTGRES_CONNECTION_STRING = os.environ.get(
+    "POSTGRES_CONNECTION_STRING",
+    f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+)
+
 USE_PLANNER = True
 OUTSIDE_AUTOEXEC = os.environ.get("OUTSIDE_AUTOEXEC", "on").lower() in {"on","1","true","yes"}
 RUN_OPEN = "[[RUN]]"
@@ -149,13 +208,81 @@ RUN_CLOSE = "[[/RUN]]"
 SEMANTIC_FALLBACK = os.environ.get("SEMANTIC_FALLBACK", "on").lower() in {"on","1","true","yes"}
 OUT_OF_TOOL_MAXTOKENS = int(os.environ.get("OUT_OF_TOOL_MAXTOKENS", "5000"))
 
+# =========================
+# PostgreSQL Connection Helper (psycopg3)
+# =========================
+def _get_pg_connection():
+    """Cria uma conexão com o PostgreSQL Data Mart usando psycopg3"""
+    if not DB_PASSWORD:
+        raise RuntimeError(
+            "Configuração do PostgreSQL incompleta no arquivo .env\n"
+            "Configure: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD"
+        )
+
+    # Connection string no formato PostgreSQL
+    conn_str = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+    # Retry em caso de erro de DNS/rede temporário
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            conn = psycopg.connect(conn_str, row_factory=dict_row)
+            return conn
+        except psycopg.OperationalError as e:
+            if attempt < max_retries - 1:
+                print(f"[AVISO] Tentativa {attempt + 1}/{max_retries} falhou: {e}")
+                print(f"[*] Tentando novamente em 2 segundos...")
+                time.sleep(2)
+            else:
+                print(f"[ERRO] Falha ao conectar apos {max_retries} tentativas")
+                raise
+
+def _pg_exec(q: str, params: list | tuple = ()):
+    """Executa uma query no PostgreSQL e retorna lista de dicts"""
+    conn = _get_pg_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(q, params)
+            if cur.description:  # Se há resultados
+                rows = cur.fetchall()
+                return [dict(row) for row in rows]
+            return []
+    finally:
+        conn.close()
+
+def _pg_cols(table: str) -> list[str]:
+    """Retorna lista de colunas de uma tabela PostgreSQL"""
+    q = """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s
+        ORDER BY ordinal_position
+    """
+    rows = _pg_exec(q, (DB_SCHEMA, table,))
+    return [r["column_name"] for r in rows]
+
+def _table_exists(table: str) -> bool:
+    """Verifica se uma tabela existe no PostgreSQL"""
+    q = """
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = %s AND table_name = %s
+        ) as exists
+    """
+    rows = _pg_exec(q, (DB_SCHEMA, table,))
+    return rows[0]["exists"] if rows else False
+
+def _fq_table(table: str) -> str:
+    """Retorna nome qualificado da tabela com schema (ex: sentinela.ajustes_estoque)"""
+    return f'"{DB_SCHEMA}"."{table}"'
+
 # ===== Model routing (planner barato + fallback) =====
 PRIMARY_MODEL = os.environ.get("PRIMARY_MODEL", "gpt-4o-mini").strip()
 FREE_MODEL_ID = os.environ.get("FREE_MODEL_ID", "").strip()  # ex.: "llama-3.1-8b-instant"
 FREE_API_BASE = os.environ.get("FREE_API_BASE", "").strip()  # ex.: "https://api.groq.com/openai/v1"
 FREE_API_KEY  = os.environ.get("FREE_API_KEY", "").strip()   # ex.: sua GROQ_API_KEY
 
-MODEL_KW = dict(temperature=0.0)  # zero criatividade; queremos determinismo
+MODEL_KW = dict(temperature=1.0)  # zero criatividade; queremos determinismo
 
 import contextlib
 import re as _route_re
@@ -220,7 +347,11 @@ def _run_with_retry(agent_obj, message: str, max_attempts: int = 2):
     for _ in range(max_attempts):
         try:
             resp = agent_obj.run(message)
-            return True, (resp.content or ""), None
+            # Extrai nomes das tools usadas
+            tools_used = []
+            if hasattr(resp, 'tools') and resp.tools:
+                tools_used = [t.tool_name for t in resp.tools if hasattr(t, 'tool_name') and t.tool_name]
+            return True, (resp.content or ""), None, tools_used
         except Exception as e:
             last_err = e
             msg = str(e).lower()
@@ -228,7 +359,7 @@ def _run_with_retry(agent_obj, message: str, max_attempts: int = 2):
                 time.sleep(0.4)
                 continue
             break
-    return False, "", last_err
+    return False, "", last_err, []
 
 def _coerce_int_any(v) -> Optional[int]:
     import re
@@ -299,7 +430,7 @@ def _extract_loja_from_text(text: str) -> Optional[int]:
 # =========================
 # CSV (legacy) - funções + endpoints
 # =========================
-def _set_resp_headers(resp: Response | None, *, provider: str, model_id: str, path: str, fallback: bool=False):
+def _set_resp_headers(resp: Response | None, *, provider: str, model_id: str, path: str, fallback: bool=False, tools_used: list=None):
     if resp is None:
         return
     resp.headers["X-Model-Provider"] = provider or ""
@@ -307,6 +438,8 @@ def _set_resp_headers(resp: Response | None, *, provider: str, model_id: str, pa
     resp.headers["X-Responder-Path"] = path or ""
     if fallback:
         resp.headers["X-Model-Fallback"] = "primary"
+    if tools_used:
+        resp.headers["X-Tools-Used"] = ", ".join(tools_used)
 
 def _set_router_debug_headers(resp: Response, *, msg: str, provider: str):
     try:
@@ -317,46 +450,30 @@ def _set_router_debug_headers(resp: Response, *, msg: str, provider: str):
     resp.headers["X-Free-Enabled"] = "1" if bool(FREE_MODEL_ID) else "0"
     resp.headers["X-Forced-Provider"] = provider or ""
 
+# Funções de CSV desabilitadas - dados vêm direto do PostgreSQL
 def head_csv_fn(filename: str, n: int = 5):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    path = os.path.join(DATA_DIR, filename)
-    if not os.path.exists(path):
-        return {"status": "error", "message": f"Arquivo não encontrado: {filename}"}
+    return {"status": "error", "message": "Função desabilitada. Os dados vêm direto do PostgreSQL."}
 
-    def try_read():
-        try:
-            return pd.read_csv(
-                path, sep=None, engine="python", encoding="latin-1",
-                nrows=max(5, n), on_bad_lines="skip"
-            )
-        except Exception:
-            for sep in [";", ",", "\t", "|"]:
-                try:
-                    return pd.read_csv(
-                        path, sep=sep, engine="python", encoding="latin-1",
-                        nrows=max(5, n), on_bad_lines="skip"
-                    )
-                except Exception:
-                    continue
-            raise
+def list_csvs_fn():
+    return {"status": "error", "message": "Função desabilitada. Use list_tables para ver as tabelas disponíveis no PostgreSQL."}
 
+def list_tables_fn():
+    """Lista todas as tabelas disponíveis no PostgreSQL Data Mart"""
     try:
-        df = try_read()
-
-        def to_py(v):
-            if pd.isna(v): return None
-            if isinstance(v, np.integer):  return int(v)
-            if isinstance(v, np.floating): return float(v)
-            if isinstance(v, np.bool_):    return bool(v)
-            return v
-
-        preview = df.iloc[:n].applymap(to_py).to_dict(orient="records")
-        cols = [str(c) for c in df.columns.tolist()]
-        return {"status": "ok", "columns": cols, "preview": preview}
+        q = """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = %s
+            AND table_type = 'BASE TABLE'
+            ORDER BY table_name
+        """
+        rows = _pg_exec(q, (DB_SCHEMA,))
+        tables = [r["table_name"] for r in rows]
+        return {"status": "ok", "tables": tables, "count": len(tables)}
     except Exception as e:
         return {"status": "error", "message": f"{type(e).__name__}: {e}"}
 
-ALLOWED_TOOLS = {"sql_head", "sql_filter", "sql_aggregate", "sku_intersection", "head_csv", "list_csvs","none", "sql_count"}
+ALLOWED_TOOLS = {"sql_head", "sql_aggregate", "sku_intersection", "list_tables", "none", "sql_count", "sku_tre_table", "pandas_analysis"}
 TOOL_ALIASES = {
     "head": "sql_head",
     "sample": "sql_head",
@@ -371,9 +488,9 @@ TOOL_ALIASES = {
     "groupby": "sql_aggregate",
     "group_by": "sql_aggregate",
 
-    "sql_list_tables": "list_csvs",
-    "list_tables": "list_csvs",
-    "tables": "list_csvs",
+    "sql_list_tables": "list_tables",
+    "tables": "list_tables",
+    "list_csvs": "list_tables",  # Redirecionamento para compatibilidade
 
     "sku_intersect": "sku_intersection",
     "sku_overlap": "sku_intersection",
@@ -382,6 +499,19 @@ TOOL_ALIASES = {
     "conte": "sql_count",
     "quantas_vezes": "sql_count",
     "ocorrencias": "sql_count",
+
+    "cross_analysis": "sku_tre_table",
+    "sku_cross": "sku_tre_table",
+    "cross_sku": "sku_tre_table",
+    "cruzar_sku": "sku_tre_table",
+    "cruzamento": "sku_tre_table",
+    "tree_table": "sku_tre_table",
+    "arvore_sku": "sku_tre_table",
+
+    "pandas": "pandas_analysis",
+    "analise_avancada": "pandas_analysis",
+    "python_analysis": "pandas_analysis",
+    "advanced_analysis": "pandas_analysis",
 }
 
 class Plan(BaseModel):
@@ -409,7 +539,7 @@ def call_list_csvs():
     return list_csvs_fn()
 
 # =========================
-# SQLite helpers + upload
+# PostgreSQL helpers (antigo SQLite)
 # =========================
 def _unaccent_sql(expr: str) -> str:
     # remove alguns acentos comuns (minúsc/maiúsc). adicione mais se precisar.
@@ -426,35 +556,10 @@ def _unaccent_sql(expr: str) -> str:
         expr = f"replace({expr}, '{a}', '{b}')"
     return expr
 
-def _sqlite_exec(q: str, params: list | tuple = ()):
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    try:
-        cur = con.execute(q, params)
-        rows = [dict(r) for r in cur.fetchall()]
-        return rows
-    finally:
-        con.close()
-
-def _sqlite_cols(table: str) -> list[str]:
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    try:
-        cols = [r["name"] for r in con.execute(f'PRAGMA table_info("{table}")').fetchall()]
-        return cols
-    finally:
-        con.close()
-
-def _table_exists(table: str) -> bool:
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    try:
-        ok = con.execute(
-            'SELECT 1 FROM sqlite_master WHERE type="table" AND name=? LIMIT 1', (table,)
-        ).fetchone() is not None
-        return ok
-    finally:
-        con.close()
+# Aliases para manter compatibilidade com código existente
+_sqlite_exec = _pg_exec
+_sqlite_cols = _pg_cols
+# _table_exists já foi definida acima
 
 def _sniff_sep(file_path: str) -> str:
     try:
@@ -468,7 +573,11 @@ def _sniff_sep(file_path: str) -> str:
     sep = max(counts, key=counts.get) if any(counts.values()) else ";"
     return sep
 
+# Funções de importação CSV desabilitadas - dados vêm direto do PostgreSQL
 def _import_csv_to_sqlite(temp_csv_path: str, table: str) -> dict:
+    return {"status": "error", "message": "Importação de CSV desabilitada. Dados vêm direto do PostgreSQL."}
+
+def _import_csv_to_sqlite_OLD(temp_csv_path: str, table: str) -> dict:
     con = sqlite3.connect(DB_PATH)
     con.execute("PRAGMA journal_mode=WAL;")
     con.execute("PRAGMA synchronous=NORMAL;")
@@ -525,34 +634,24 @@ def _import_csv_to_sqlite(temp_csv_path: str, table: str) -> dict:
 
 @app.post("/upload_csv")
 async def upload_csv(file: UploadFile = File(...), table: str = Form(None)):
-    """Recebe um CSV (multipart/form-data) e ingere em SQLite (data/sentinela.db)."""
-    if not file.filename.lower().endswith(".csv"):
-        return {"status": "error", "message": "Envie um arquivo .csv"}
-
-    safe_table = _safe_table_name(table or pathlib.Path(file.filename).stem)
-
-    os.makedirs(DATA_DIR, exist_ok=True)
-
-    # salva upload em arquivo temporário
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = tmp.name
-
-    try:
-        info = _import_csv_to_sqlite(tmp_path, safe_table)
-        rebuild_catalog()
-        return {"status": "ok", "db": DB_PATH, "table": safe_table, **info}
-    finally:
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
+    """Endpoint desabilitado - dados vêm direto do PostgreSQL."""
+    return {
+        "status": "error",
+        "message": "Upload de CSV desabilitado. Os dados são carregados diretamente do PostgreSQL."
+    }
 
 def _safe_table_name(stem: str) -> str:
     name = re.sub(r'[^A-Za-z0-9_]+', '_', stem).strip('_').lower()
     return name or "tabela"
 
 def ingest_all_fn(recursive: bool = False):
+    """Função desabilitada - dados vêm direto do PostgreSQL"""
+    return {
+        "status": "error",
+        "message": "Ingestão de CSVs desabilitada. Os dados são carregados diretamente do PostgreSQL."
+    }
+
+def ingest_all_fn_OLD(recursive: bool = False):
     os.makedirs(DATA_DIR, exist_ok=True)
     imported = []
 
@@ -569,7 +668,7 @@ def ingest_all_fn(recursive: bool = False):
         stem = pathlib.Path(path).stem
         table = _safe_table_name(stem)
         try:
-            info = _import_csv_to_sqlite(path, table)
+            info = _import_csv_to_sqlite_OLD(path, table)
             imported.append({"file": os.path.relpath(path, DATA_DIR), "table": table, **info})
         except Exception as e:
             imported.append({"file": os.path.relpath(path, DATA_DIR), "table": table,
@@ -655,12 +754,23 @@ def _tags_from_tokens(tokens: set[str]) -> set[str]:
 CATALOG: dict = {}
 
 def rebuild_catalog():
+    """Reconstrói o catálogo de tabelas do PostgreSQL Data Mart"""
     global CATALOG
     CATALOG = {}
-    tabs = _sqlite_exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+
+    # Lista tabelas do PostgreSQL
+    q = """
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = %s
+        AND table_type = 'BASE TABLE'
+        ORDER BY table_name
+    """
+    tabs = _pg_exec(q, (DB_SCHEMA,))
+
     for r in tabs:
-        tname = r["name"]
-        cols = [c["name"] for c in _sqlite_exec(f'PRAGMA table_info("{tname}")')]
+        tname = r["table_name"]
+        cols = _pg_cols(tname)
         t_tokens = _tokens(tname)
         col_tags = {c: _tag_of_column(c) for c in cols}
         name_tags = _tags_from_tokens(t_tokens)
@@ -694,7 +804,7 @@ def _key_to_col(table: str, k: str, meta: dict | None = None) -> str | None:
         c = _first_col_with_tag(table, "quantity")
         if c: return c
 
-    cols = set(_sqlite_cols(table))
+    cols = set(_pg_cols(table))
     if k in cols:
         return k
     m = {c.lower(): c for c in cols}
@@ -846,7 +956,7 @@ def _infer_by(table: str, toks: set[str]) -> str | None:
     for tag in pref:
         col = _first_col_with_tag(table, tag)
         if col: return col
-    cols = _sqlite_cols(table)
+    cols = _pg_cols(table)
     info = CATALOG.get(table, {})
     bad = {"date","amount"}
     for c in cols:
@@ -902,17 +1012,24 @@ def _planner_prompt(user_msg: str) -> str:
         "Você é um PLANEJADOR. Retorne SOMENTE JSON válido com este formato:\n"
         "{"
         "  \"mode\": \"tool|answer|delegate\","
-        "  \"tool\": \"sql_head|sql_filter|sql_aggregate|sku_intersection|sql_count|list_csvs|null\","
+        "  \"tool\": \"sql_head|sql_filter|sql_aggregate|sku_intersection|sql_count|list_csvs|pandas_analysis|sku_tre_table|null\","
 
         "  \"params\": { ... },"
         "  \"rewrite\": \"mensagem reescrita para o agente responder sem consultar DB\","
         "  \"confidence\": 0.0"
         "}\n\n"
-        "Regras:\n"
+        "REGRA CRÍTICA - CRUZAMENTO DE 3 TABELAS (Ajuste + Inventário + Troca):\n"
+        "- Quando o usuário pedir SKUs que aparecem em ajuste, inventário E troca → use tool 'sku_tre_table'\n"
+        "- Extraia: loja, data_ini (YYYY-MM-DD), data_fim (YYYY-MM-DD)\n"
+        "- Converta meses PT-BR: janeiro=01, fevereiro=02, ..., dezembro=12\n"
+        "- params para sku_tre_table: {\"p_loja\": \"002\", \"p_data_ini\": \"2025-01-01\", \"p_data_fim\": \"2025-06-30\", \"p_rule\": \"any\"}\n\n"
+        "EXEMPLOS de sku_tre_table:\n"
+        "- 'SKUs da loja 111 em abril de 2025 com ajuste, inventário e troca' → {\"p_loja\": \"111\", \"p_data_ini\": \"2025-04-01\", \"p_data_fim\": \"2025-04-30\"}\n"
+        "- 'loja 002 entre janeiro e junho de 2025' → {\"p_loja\": \"002\", \"p_data_ini\": \"2025-01-01\", \"p_data_fim\": \"2025-06-30\"}\n\n"
+        "Regras gerais:\n"
         "- Use mode \"tool\" quando o usuário quer números, contagens, filtros, amostras, agregações ou cruzar tabelas.\n"
-        "- Use mode \"answer\" para perguntas conceituais/explicativas. NÃO invente números; apenas reescreva a pergunta (rewrite) já normalizada (datas AAAA-MM-DD, loja sem zeros à esquerda, termos claros).\n"
+        "- Use mode \"answer\" para perguntas conceituais/explicativas. NÃO invente números.\n"
         "- Use mode \"delegate\" se estiver incerto.\n"
-        "- Se a pergunta tiver meses PT-BR (janeiro..dezembro), converta para start/end AAAA-MM-DD.\n"
         "- Não invente nomes de tabela; escolha entre as do catálogo.\n\n"
         f"Catálogo enxuto: {json.dumps(schema, ensure_ascii=False)}\n\n"
         f"Pedido do usuário: {user_msg}\n"
@@ -930,7 +1047,7 @@ def planner_route(user_msg: str) -> tuple[str, Optional[str]]:
         )
         prompt = _planner_prompt(user_msg)
 
-        ok, out, _err = _run_with_retry(planner, prompt)
+        ok, out, _err, _tools = _run_with_retry(planner, prompt)
         if (not ok) or (not out or not out.strip()):
             if provider != "primary":
                 planner = Agent(
@@ -938,7 +1055,7 @@ def planner_route(user_msg: str) -> tuple[str, Optional[str]]:
                     system_message="Retorne APENAS JSON válido, sem texto extra.",
                     model=_make_model(PRIMARY_MODEL, "primary"),
                 )
-                ok, out, _err = _run_with_retry(planner, prompt)
+                ok, out, _err, _tools = _run_with_retry(planner, prompt)
             if (not ok) or (not out or not out.strip()):
                 return ("fail", None)
 
@@ -1186,20 +1303,69 @@ def _answer_outside_tools(msg: str) -> str:
     schema = _mini_schema_for_prompt(msg)
 
     system = (
-        "Você é um ANALISTA & SOLUCIONADOR do Sentinela.\n"
-        "Regras:\n"
-        "1) Se a pergunta for conceitual, responda de forma clara e objetiva.\n"
-        "2) Se exigir dados (contar/somar/filtrar/agrupar/período), NÃO invente números.\n"
-        "   Em vez disso, proponha EXATAMENTE UM comando válido do Sentinela, "
-        "   dentro das tags [[RUN]] ... [[/RUN]]. Sem explicações DENTRO das tags.\n"
-        "   Exemplos válidos: \n"
-        "     [[RUN]]mostre cancelamento_2025 com 5 linhas[[/RUN]]\n"
-        "     [[RUN]]filtre LOJA=017 e SKU=999999992513081 em inventario_saida_042025 limite 20[[/RUN]]\n"
-        "     [[RUN]]agregue em devolucao por SKU somando VALORBRUTO entre 2025-01-01 e 2025-06-30 top 20[[/RUN]]\n"
-        "3) Depois das tags, explique brevemente o que o comando faz e como interpretar o resultado.\n"
-        "4) Considere problemas de codificação/acentos (ex.: 'Sa?a' vs 'Saída'); quando filtrar texto, prefira icontains.\n"
-        "5) Use TABELAS e COLUNAS somente do catálogo a seguir (não invente nomes).\n"
-        f"Catálogo enxuto: {json.dumps(schema, ensure_ascii=False)}\n"
+        "🔍 Você é um ANALISTA DE FRAUDES & SOLUCIONADOR do Sentinela.\n\n"
+
+        "MISSÃO: Ajudar a detectar fraudes e inconsistências em dados de estoque através de análise cruzada.\n\n"
+
+        "REGRAS DE OPERAÇÃO:\n\n"
+
+        "1) PERGUNTAS CONCEITUAIS:\n"
+        "   → Responda de forma clara e objetiva\n"
+        "   → Explique padrões de fraude quando relevante\n\n"
+
+        "2) PERGUNTAS QUE EXIGEM DADOS (contar/filtrar/agrupar/cruzar):\n"
+        "   → NÃO invente números ou dados\n"
+        "   → Proponha EXATAMENTE UM comando válido dentro de [[RUN]] ... [[/RUN]]\n"
+        "   → SEM explicações DENTRO das tags\n\n"
+
+        "   EXEMPLOS DE COMANDOS VÁLIDOS:\n"
+        "   • Visualizar dados:\n"
+        "     [[RUN]]mostre ajustes_estoque com 10 linhas[[/RUN]]\n"
+        "     [[RUN]]mostre vendas_canceladas com 5 linhas[[/RUN]]\n\n"
+
+        "   • Filtrar por loja/SKU:\n"
+        "     [[RUN]]filtre loja=022 em ajustes_estoque limite 20[[/RUN]]\n"
+        "     [[RUN]]filtre loja=01 e sku=12345 em inventario_saida limite 10[[/RUN]]\n\n"
+
+        "   • Agregar/agrupar dados:\n"
+        "     [[RUN]]agregue em ajustes_estoque por loja contando id top 10[[/RUN]]\n"
+        "     [[RUN]]agregue em vendas_canceladas por sku somando valor_bruto top 20[[/RUN]]\n\n"
+
+        "   • Análise por período:\n"
+        "     [[RUN]]filtre data entre 2025-01-01 e 2025-03-31 em troca limite 50[[/RUN]]\n\n"
+
+        "3) APÓS AS TAGS [[RUN]]...[[/RUN]]:\n"
+        "   → Explique brevemente o que o comando faz\n"
+        "   → Oriente como interpretar o resultado\n"
+        "   → Se for análise de fraude, destaque o que procurar (padrões suspeitos)\n\n"
+
+        "4) PROBLEMAS DE CODIFICAÇÃO:\n"
+        "   → Considere acentos (ex.: 'Sa?a' vs 'Saída')\n"
+        "   → Para filtros de texto, prefira 'icontains' (case-insensitive)\n\n"
+
+        "5) TABELAS E COLUNAS DISPONÍVEIS:\n"
+        "   → Use SOMENTE tabelas/colunas do catálogo abaixo\n"
+        "   → NÃO invente nomes de tabelas ou colunas\n\n"
+
+        "   TABELAS PRINCIPAIS:\n"
+        "   • ajustes_estoque - Ajustes manuais de estoque\n"
+        "   • vendas_canceladas - Cancelamentos de vendas\n"
+        "   • inventario_saida - Saídas de inventário\n"
+        "   • troca - Trocas de produtos\n\n"
+
+        "6) ANÁLISE DE FRAUDES:\n"
+        "   → Quando detectar padrões suspeitos, use emojis:\n"
+        "     🚨 = Fraude altamente provável\n"
+        "     ⚠️ = Padrão suspeito que requer investigação\n"
+        "     ℹ️ = Informação relevante\n\n"
+
+        "   PADRÕES SUSPEITOS COMUNS:\n"
+        "   • SKU com múltiplos ajustes em curto período\n"
+        "   • Ajuste seguido de cancelamento\n"
+        "   • Inventário saída + troca no mesmo dia\n"
+        "   • Usuário com alta frequência de ajustes\n\n"
+
+        f"CATÁLOGO DE DADOS:\n{json.dumps(schema, ensure_ascii=False)}\n"
     )
 
     # se for claramente “pergunta de dados”, força a sugerir 1 comando
@@ -1213,7 +1379,7 @@ def _answer_outside_tools(msg: str) -> str:
         prompt = f"Pedido do usuário: {msg}\nSe precisar de dados, use [[RUN]]...[[/RUN]]."
 
     tmp_agent = Agent(name="explainer", model=big_model, system_message=system)
-    ok, out, err = _run_with_retry(tmp_agent, prompt)
+    ok, out, err, _tools = _run_with_retry(tmp_agent, prompt)
     return out or (f"Erro: {err}" if err else "Sem resposta.")
 CMD_LINE_RE = re.compile(r'^\s*(mostre|agregue|filtr[ea])\b.+$', re.I | re.M)
 
@@ -1260,10 +1426,10 @@ def sql_count_fn(table: str, where: dict | None = None):
     except ValueError as e:
         return {"status": "error", "message": str(e)}
 
-    q = f'SELECT COUNT(*) AS total FROM "{table}"'
+    q = f'SELECT COUNT(*) AS total FROM {_fq_table(table)}'
     if where_sql:
         q += f" WHERE {where_sql}"
-    rows = _sqlite_exec(q, params)
+    rows = _pg_exec(q, params)
     total = int(rows[0]["total"]) if rows else 0
 
     # envelope + html simples (caso alguém chame direto)
@@ -1279,7 +1445,7 @@ def sql_count_fn(table: str, where: dict | None = None):
 def sql_head_fn(table: str, n: int = 5):
     if not _table_exists(table):
         return {"status": "error", "message": f"Tabela não encontrada: {table}"}
-    rows = _sqlite_exec(f'SELECT * FROM "{table}" LIMIT ?', [max(1, int(n))])
+    rows = _pg_exec(f'SELECT * FROM {_fq_table(table)} LIMIT %s', [max(1, int(n))])
     return {"status": "ok", "rows": rows}
 
 def sql_aggregate_fn(
@@ -1295,7 +1461,7 @@ def sql_aggregate_fn(
     if not _table_exists(table):
         return {"status": "error", "message": f"Tabela não encontrada: {table}"}
 
-    cols_all = set(_sqlite_cols(table))
+    cols_all = set(_pg_cols(table))
     # normaliza BY → lista
     if isinstance(by, str):
         by_cols_raw = [c.strip() for c in re.split(r"[,\+\|]", by) if c.strip()]
@@ -1357,18 +1523,18 @@ def sql_aggregate_fn(
 
     q = (
         f'SELECT {", ".join(select_parts)}, {agg_expr} AS valor '
-        f'FROM "{table}"'
+        f'FROM {_fq_table(table)}'
     )
     if where_sql:
         q += where_sql
-    q += f" GROUP BY {', '.join(group_parts)} ORDER BY valor DESC LIMIT ?"
+    q += f" GROUP BY {', '.join(group_parts)} ORDER BY valor DESC LIMIT %s"
     params.append(max(1, int(top)))
 
-    rows = _sqlite_exec(q, params)
+    rows = _pg_exec(q, params)
     return {"status": "ok", "rows": rows, "meta": {"table": table, "by": out_cols, "op": op, "value": value, "start": start, "end": end}}
 
 def _guess_cols(table: str):
-    cols = _sqlite_cols(table)
+    cols = _pg_cols(table)
 
     def norm(s: str) -> str:
         return re.sub(r'[^a-z0-9]+', '', s.lower())
@@ -1476,36 +1642,36 @@ def sku_intersection_fn(
     q = f"""
     WITH a_f AS (
       SELECT {a_sku} AS SKU
-      FROM "{ajustes}"
+      FROM {_fq_table(ajustes)}
       {"WHERE " + a_where_sql if a_where_sql else ""}
     ),
     d_f AS (
       SELECT {d_sku} AS SKU
-      FROM "{devol}"
+      FROM {_fq_table(devol)}
       {"WHERE " + d_where_sql if d_where_sql else ""}
     ),
     inter AS (
       SELECT DISTINCT a_f.SKU
       FROM a_f JOIN d_f ON a_f.SKU = d_f.SKU
     )
-    SELECT SKU FROM inter LIMIT ?
+    SELECT SKU FROM inter LIMIT %s
     """
-    rows = _sqlite_exec(q, a_params + d_params + [max(1, int(limit))])
+    rows = _pg_exec(q, a_params + d_params + [max(1, int(limit))])
 
     diag_q = f"""
-      SELECT 
+      SELECT
         (SELECT COUNT(*) FROM a_f) AS ajustes_filtrados,
         (SELECT COUNT(*) FROM d_f) AS devolucoes_filtradas,
         (SELECT COUNT(*) FROM inter) AS intersecao
       FROM (SELECT 1)
     """
-    diag = _sqlite_exec(
+    diag = _pg_exec(
         f"""
         WITH a_f AS (
-          SELECT {a_sku} AS SKU FROM "{ajustes}" {"WHERE " + a_where_sql if a_where_sql else ""}
+          SELECT {a_sku} AS SKU FROM {_fq_table(ajustes)} {"WHERE " + a_where_sql if a_where_sql else ""}
         ),
         d_f AS (
-          SELECT {d_sku} AS SKU FROM "{devol}" {"WHERE " + d_where_sql if d_where_sql else ""}
+          SELECT {d_sku} AS SKU FROM {_fq_table(devol)} {"WHERE " + d_where_sql if d_where_sql else ""}
         ),
         inter AS (
           SELECT DISTINCT a_f.SKU FROM a_f JOIN d_f ON a_f.SKU = d_f.SKU
@@ -1526,7 +1692,7 @@ def sku_intersection_fn(
     return {"status":"ok","rows": rows, "meta": meta}
 
 def _resolve_col(table: str, name: str) -> str | None:
-    cols = _sqlite_cols(table)
+    cols = _pg_cols(table)
     m = {c.lower(): c for c in cols}
     return m.get(name.lower())
 
@@ -1535,9 +1701,10 @@ def _is_digits_str(x) -> bool:
     return re.fullmatch(r"0*\d+", s) is not None
 
 def _norm_numstr_sql(expr: str) -> str:
+    # PostgreSQL usa ~ para regex (SQLite usava GLOB)
     return (
         f"(CASE "
-        f"  WHEN {expr} GLOB '[0-9]*' "
+        f"  WHEN {expr} ~ '^[0-9]' "
         f"  THEN (CASE WHEN ltrim({expr}, '0')='' THEN '0' ELSE ltrim({expr}, '0') END) "
         f"  ELSE {expr} "
         f"END)"
@@ -1577,17 +1744,17 @@ def _build_where(table: str, where: dict) -> tuple[str, list]:
 
         if op == "eq":
             if _is_digits_str(val):
-                clauses.append(f"{norm_col} = (CASE WHEN ltrim(?, '0')='' THEN '0' ELSE ltrim(?, '0') END)")
+                clauses.append(f"{norm_col} = (CASE WHEN ltrim(%s, '0')='' THEN '0' ELSE ltrim(%s, '0') END)")
                 params.extend([str(val), str(val)])
             else:
-                clauses.append(f'"{col}" = ?'); params.append(val)
+                clauses.append(f'"{col}" = %s'); params.append(val)
 
         elif op == "ne":
             if _is_digits_str(val):
-                clauses.append(f"{norm_col} != (CASE WHEN ltrim(?, '0')='' THEN '0' ELSE ltrim(?, '0') END)")
+                clauses.append(f"{norm_col} != (CASE WHEN ltrim(%s, '0')='' THEN '0' ELSE ltrim(%s, '0') END)")
                 params.extend([str(val), str(val)])
             else:
-                clauses.append(f'"{col}" != ?'); params.append(val)
+                clauses.append(f'"{col}" != %s'); params.append(val)
 
         elif op in {"gt","gte","lt","lte"}:
             cast = f'CAST("{col}" AS REAL)'
@@ -1595,7 +1762,7 @@ def _build_where(table: str, where: dict) -> tuple[str, list]:
             if isinstance(val, str):
                 try: val = float(val.replace(",", "."))
                 except: pass
-            clauses.append(f"{cast} {sym} ?"); params.append(val)
+            clauses.append(f"{cast} {sym} %s"); params.append(val)
 
         elif op == "icontains":
             # normaliza o valor de busca para minúsculas
@@ -1603,43 +1770,43 @@ def _build_where(table: str, where: dict) -> tuple[str, list]:
             # citação da coluna sem f-string aninhada (evita SyntaxError)
             col_quoted = f'"{col}"'
             col_norm = f"lower({col_quoted})"
-            clauses.append(f"{col_norm} LIKE ?")
-            params.append(f"%{val_norm}%")
+            clauses.append(f"{col_norm} LIKE %s")
+            params.append(f"%%{val_norm}%%")
 
         elif op == "between":
             if not isinstance(val, (list, tuple)) or len(val) != 2:
                 raise ValueError(f"between espera [low, high] em {key}")
             lo, hi = val
             if isinstance(lo, str):
-                try: lo = float(lo.replace(",", ".")); 
+                try: lo = float(lo.replace(",", "."));
                 except: pass
             if isinstance(hi, str):
-                try: hi = float(hi.replace(",", ".")); 
+                try: hi = float(hi.replace(",", "."));
                 except: pass
             cast = f'CAST("{col}" AS REAL)'
-            clauses.append(f"({cast} BETWEEN ? AND ?)"); params.extend([lo, hi])
+            clauses.append(f"({cast} BETWEEN %s AND %s)"); params.extend([lo, hi])
 
         elif op == "date_between":
             expr = _date_expr_auto(col)
             if not isinstance(val, (list, tuple)) or len(val) != 2:
                 raise ValueError(f"date_between espera [start, end] em {key}")
             start, end = val
-            clauses.append(f"(date({expr}) BETWEEN date(?) AND date(?))"); params.extend([start, end])
+            clauses.append(f"(date({expr}) BETWEEN date(%s) AND date(%s))"); params.extend([start, end])
 
         elif op == "contains":
-            clauses.append(f'"{col}" LIKE ?'); params.append(f"%{val}%")
+            clauses.append(f'"{col}" LIKE %s'); params.append(f"%%{val}%%")
 
         elif op == "in":
             seq = list(val) if isinstance(val, (list, tuple, set)) else []
             if not seq:
                 clauses.append("1=0")
             elif all(_is_digits_str(v) for v in seq):
-                ph = ",".join(["(CASE WHEN ltrim(?, '0')='' THEN '0' ELSE ltrim(?, '0') END)"] * len(seq))
+                ph = ",".join(["(CASE WHEN ltrim(%s, '0')='' THEN '0' ELSE ltrim(%s, '0') END)"] * len(seq))
                 clauses.append(f"{norm_col} IN ({ph})")
                 for v in seq:
                     params.extend([str(v), str(v)])
             else:
-                ph = ",".join(["?"] * len(seq))
+                ph = ",".join(["%s"] * len(seq))
                 clauses.append(f'"{col}" IN ({ph})'); params.extend(list(seq))
         else:
             raise ValueError(f"Operador não suportado: {op}")
@@ -1685,21 +1852,21 @@ def sql_filter_fn(table: str, where: dict | None = None, limit: int = 100,
     ob_col = _resolve_col(table, order_by) if order_by else None
     ord_kw = "ASC" if str(order).lower() == "asc" else "DESC"
 
-    q = f'SELECT * FROM "{table}"'
+    q = f'SELECT * FROM {_fq_table(table)}'
     if where_sql:
         q += f" WHERE {where_sql}"
     if ob_col:
         q += f' ORDER BY "{ob_col}" {ord_kw}'
-    q += " LIMIT ? OFFSET ?"
+    q += " LIMIT %s OFFSET %s"
 
-    rows = _sqlite_exec(q, params + [max(1, int(limit)), max(0, int(offset))])
+    rows = _pg_exec(q, params + [max(1, int(limit)), max(0, int(offset))])
     if not rows and where:
         # testa cada condição isoladamente para apontar a "culpada"
         diag = {}
         for k,v in where.items():
             try:
                 ws, ps = _build_where(table, {k:v})
-                cnt = _sqlite_exec(f'SELECT COUNT(*) AS c FROM "{table}" WHERE {ws}', ps)[0]["c"]
+                cnt = _pg_exec(f'SELECT COUNT(*) AS c FROM {_fq_table(table)} WHERE {ws}', ps)[0]["c"]
                 diag[k] = cnt
             except Exception as e:
                 diag[k] = f"erro: {e}"
@@ -1756,8 +1923,8 @@ def call_sql_filter(
 
 @app.get("/tool/sku_intersection")
 def call_sku_intersection(
-    ajustes: str | None = Query(None, description="ex.: ajustes_estoque_2025 (opcional)"),
-    devol:   str | None = Query(None, description="ex.: devolucao (opcional)"),
+    ajustes: str | None = Query(None, description="ex.: ajustes_estoque (opcional)"),
+    devol:   str | None = Query(None, description="ex.: inventario_saida (opcional)"),
     loja:    str       = Query(...,  description="ex.: 17 ou 017"),
     start:   str       = Query(...,  description="AAAA-MM-DD"),
     end:     str       = Query(...,  description="AAAA-MM-DD"),
@@ -1780,7 +1947,202 @@ def call_sql_aggregate(
     return sql_aggregate_fn(table, by, value, op, top)
 
 # =========================
-# Registro das tools e Agent 
+# Ferramentas Avançadas de Cruzamento
+# =========================
+
+def sku_tre_table_fn(
+    p_loja: str,
+    p_data_ini: str,
+    p_data_fim: str
+):
+    """
+    Chama a FUNCTION do PostgreSQL 'sku_tre_table' que cruza SKUs entre
+    as três tabelas: ajustes_estoque, inventario_saida e troca.
+
+    Retorna SKUs que aparecem em TROCA (obrigatório) E em AJUSTE ou INVENTÁRIO.
+
+    Parâmetros:
+    - p_loja: código da loja (ex: '002', '111')
+    - p_data_ini: data inicial YYYY-MM-DD
+    - p_data_fim: data final YYYY-MM-DD
+
+    Retorna:
+    - Lista de SKUs com datas de cada origem (ajuste_contagem, inventario_saida, devolucao_troca)
+    """
+    try:
+        # Valida parâmetros
+        if not p_loja:
+            return {"status": "error", "message": "Parâmetro 'p_loja' é obrigatório"}
+        if not p_data_ini or not p_data_fim:
+            return {"status": "error", "message": "Parâmetros 'p_data_ini' e 'p_data_fim' são obrigatórios"}
+
+        # Normaliza loja (remove zeros à esquerda extra, mas mantém formato)
+        p_loja = str(p_loja).strip()
+
+        # Chama a FUNCTION do PostgreSQL (3 parâmetros: loja, data_ini, data_fim)
+        q = f"SELECT * FROM {DB_SCHEMA}.sku_tre_table(%s, %s, %s)"
+        rows = _pg_exec(q, [p_loja, p_data_ini, p_data_fim])
+
+        return {
+            "status": "ok",
+            "rows": rows,
+            "total": len(rows),
+            "params": {
+                "loja": p_loja,
+                "data_ini": p_data_ini,
+                "data_fim": p_data_fim
+            }
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Erro ao executar sku_tre_table: {e}"}
+
+
+
+
+
+def pandas_analysis_fn(
+    tables: list[str],
+    analysis_type: str,
+    filters: dict | None = None,
+    group_by: str | None = None,
+    date_range: list[str] | None = None,
+    limit: int = 100
+):
+    """
+    Análise avançada com pandas - cruza múltiplas tabelas, filtra, agrega.
+    Similar ao GPT-5 com execução de código Python.
+
+    Args:
+        tables: Lista de nomes de tabelas ['ajustes_estoque', 'inventario_saida']
+        analysis_type: 'intersection', 'cross_join', 'aggregate', 'filter'
+        filters: {table_name: {column: value}} ex: {'ajustes_estoque': {'TIPO': 'saída'}}
+        group_by: Coluna para agrupar
+        date_range: ['2025-01-01', '2025-06-30']
+        limit: Limite de resultados
+    """
+    try:
+        # Conecta ao PostgreSQL Data Mart
+        conn = _get_pg_connection()
+
+        # Carrega tabelas em DataFrames
+        dfs = {}
+        for table in tables:
+            try:
+                df = pd.read_sql_query(f"SELECT * FROM {_fq_table(table)}", conn)
+                dfs[table] = df
+            except Exception as e:
+                conn.close()
+                return {"status": "error", "message": f"Erro ao carregar {table}: {str(e)}", "rows": []}
+
+        conn.close()
+
+        # Aplica filtros por tabela
+        if filters:
+            for table_name, table_filters in filters.items():
+                if table_name in dfs:
+                    df = dfs[table_name]
+                    for col, val in table_filters.items():
+                        # Busca coluna case-insensitive
+                        actual_col = None
+                        for c in df.columns:
+                            if c.upper() == col.upper():
+                                actual_col = c
+                                break
+
+                        if actual_col and actual_col in df.columns:
+                            if isinstance(val, str):
+                                df = df[df[actual_col].astype(str).str.contains(val, case=False, na=False)]
+                            else:
+                                df = df[df[actual_col] == val]
+                    dfs[table_name] = df
+
+        # Aplica filtro de data
+        if date_range and len(date_range) == 2:
+            for table_name, df in dfs.items():
+                date_col = _guess_cols(df.columns, ["data", "date", "dt"])[0]
+                if date_col:
+                    df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                    df = df[(df[date_col] >= date_range[0]) & (df[date_col] <= date_range[1])]
+                    dfs[table_name] = df
+
+        # Executa análise
+        if analysis_type == "intersection" and len(tables) >= 2:
+            # Interseção de SKUs (como GPT-5 faz)
+            sku_col_map = {}
+            for table_name, df in dfs.items():
+                sku_col = _guess_cols(df.columns, ["sku", "produto", "cod"])[0]
+                if not sku_col:
+                    return {"status": "error", "message": f"Coluna SKU não encontrada em {table_name}", "rows": []}
+                sku_col_map[table_name] = sku_col
+
+            # Cria sets de SKUs
+            skus_sets = {name: set(df[sku_col_map[name]].dropna().astype(str)) for name, df in dfs.items()}
+            common_skus = set.intersection(*skus_sets.values())
+
+            # Monta resultado detalhado
+            result_rows = []
+            for sku in sorted(list(common_skus))[:limit]:
+                row = {"SKU": sku}
+                for table_name, df in dfs.items():
+                    sku_col = sku_col_map[table_name]
+                    sku_data = df[df[sku_col].astype(str) == sku]
+                    if not sku_data.empty:
+                        date_col = _guess_cols(df.columns, ["data", "date", "dt"])[0]
+                        if date_col and date_col in sku_data.columns:
+                            dates = sku_data[date_col].dropna().astype(str).tolist()
+                            row[f"{table_name}_DATAS"] = ", ".join(dates[:3])  # Primeiras 3 datas
+                        row[f"{table_name}_QTD"] = len(sku_data)
+                result_rows.append(row)
+
+            summary = {
+                "total_skus_comuns": len(common_skus),
+                "tabelas_analisadas": len(tables),
+                "registros_por_tabela": {name: len(df) for name, df in dfs.items()},
+                "skus_por_tabela": {name: len(skus) for name, skus in skus_sets.items()}
+            }
+
+            return {
+                "status": "ok",
+                "rows": result_rows,
+                "summary": summary
+            }
+
+        elif analysis_type == "aggregate" and group_by:
+            # Agregação
+            df = list(dfs.values())[0]
+            actual_col = None
+            for c in df.columns:
+                if c.upper() == group_by.upper():
+                    actual_col = c
+                    break
+
+            if actual_col and actual_col in df.columns:
+                agg_df = df.groupby(actual_col).size().reset_index(name='CONTAGEM')
+                agg_df = agg_df.sort_values('CONTAGEM', ascending=False).head(limit)
+                result_rows = agg_df.to_dict('records')
+
+                return {
+                    "status": "ok",
+                    "rows": result_rows,
+                    "summary": {"total_grupos": len(agg_df), "total_registros": len(df)}
+                }
+
+        return {
+            "status": "error",
+            "message": f"Tipo '{analysis_type}' não suportado ou parâmetros insuficientes",
+            "rows": []
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Erro em pandas_analysis: {str(e)}\n{traceback.format_exc()}",
+            "rows": []
+        }
+
+
+# =========================
+# Registro das tools e Agent
 # =========================
 sku_intersection_tool = tool(
     name="sku_intersection",
@@ -1791,35 +2153,91 @@ sku_intersection_tool = tool(
     )
 )(sku_intersection_fn)
 
+# Ferramentas desabilitadas (CSV)
 head_csv_tool = tool(
     name="head_csv",
-    description="Mostra colunas e as primeiras linhas de um CSV da pasta data/."
+    description="[DESABILITADA] Use sql_head para visualizar dados das tabelas do PostgreSQL."
 )(head_csv_fn)
 
 list_csvs_tool = tool(
     name="list_csvs",
-    description="Lista os arquivos CSV disponíveis em data/."
+    description="[DESABILITADA] Use list_tables para listar tabelas disponíveis no PostgreSQL."
 )(list_csvs_fn)
 
+# Nova ferramenta para listar tabelas
+list_tables_tool = tool(
+    name="list_tables",
+    description="Lista todas as tabelas disponíveis no PostgreSQL Data Mart. Tabelas: ajustes_estoque, inventario_saida, troca, vendas_canceladas."
+)(list_tables_fn)
+
+# Ferramentas SQL (PostgreSQL Data Mart)
 sql_head_tool = tool(
     name="sql_head",
-    description="Mostra as primeiras N linhas de uma tabela do SQLite (data/sentinela.db)."
+    description="Mostra as primeiras N linhas de uma tabela do PostgreSQL. Tabelas disponíveis: ajustes_estoque, inventario_saida, troca, vendas_canceladas."
 )(sql_head_fn)
 
 sql_aggregate_tool = tool(
     name="sql_aggregate",
-    description="Agrega valores por categoria na tabela do SQLite. op: sum/count/avg/min/max."
+    description="Agrega valores por categoria na tabela do PostgreSQL. op: sum/count/avg/min/max. Tabelas: ajustes_estoque, inventario_saida, troca, vendas_canceladas."
 )(sql_aggregate_fn)
 
 sql_filter_tool = tool(
     name="sql_filter",
-    description="Filtra linhas no SQLite com operadores: eq, ne, gt, gte, lt, lte, in, contains, icontains."
+    description="Filtra linhas no PostgreSQL com operadores: eq, ne, gt, gte, lt, lte, in, contains, icontains. Tabelas: ajustes_estoque, inventario_saida, troca, vendas_canceladas."
 )(sql_filter_fn)
 
 sql_count_tool = tool(
     name="sql_count",
-    description="Conta linhas em uma tabela do SQLite aplicando filtros (where)."
+    description="Conta linhas em uma tabela do PostgreSQL aplicando filtros (where). Tabelas: ajustes_estoque, inventario_saida, troca, vendas_canceladas."
 )(sql_count_fn)
+
+sku_tre_table_tool = tool(
+    name="sku_tre_table",
+    description=(
+        "**ANALISADOR CRUZADO DE SKUs (Ajuste / Inventário / Troca)**\n\n"
+        "Use esta ferramenta quando o usuário pedir uma checagem dos SKUs que:\n"
+        "- Aparecem em TROCA (obrigatório) e em AJUSTE ou INVENTÁRIO (ou ambos)\n"
+        "- Quer evidências de datas por origem (todas as datas concatenadas)\n"
+        "- Filtro por loja e período (datas)\n\n"
+        "COMPORTAMENTO PRINCIPAL:\n"
+        "Retorna UMA LINHA por SKU com as colunas: sku, ajuste_contagem, inventario_saida, devolucao_troca\n"
+        "- A lógica aplicada: (Ajuste OU Inventário) E Troca\n"
+        "- Troca é obrigatória (apenas SKUs que aparecem na tabela de troca no período)\n\n"
+        "Parâmetros obrigatórios (tipos esperados):\n"
+        "- p_loja (string): código da loja, ex: '002', '111', '449' etc...\n"
+        "- p_data_ini (date string YYYY-MM-DD): data inicial do período\n"
+        "- p_data_fim (date string YYYY-MM-DD): data final do período\n\n"
+        "Retorno:\n"
+        "- lista de objetos/linhas com: { sku, ajuste_contagem, inventario_saida, devolucao_troca }\n"
+        "- datas vêm em formato 'DD/MM/YYYY; DD/MM/YYYY; ...' ou '—' quando ausente\n\n"
+        "QUANDO USAR:\n"
+        "✓ 'Me traga os SKUs da loja 002 entre janeiro e junho de 2025 que tem ajuste de contagem, inventario e troca.'\n"
+        "✓ 'Quais os SKUs da loja 111 no mês de abril de 2025 que tem ajuste de contagem, inventario e troca'\n\n"
+        "EXEMPLO DE CHAMADA (SQL-equivalente):\n"
+        "SELECT * FROM sku_tre_table('002','2025-01-01','2025-06-30');\n\n"
+        "IMPORTANTE: a IA deve extrair p_loja e o período da linguagem natural.\n"
+    )
+)(sku_tre_table_fn)
+
+pandas_analysis_tool = tool(
+    name="pandas_analysis",
+    description=(
+        "**ANÁLISE AVANÇADA COM PANDAS**\n\n"
+        "Ferramenta para análises complexas com múltiplas tabelas usando pandas.\n\n"
+        "QUANDO USAR:\n"
+        "✓ Cruzamentos entre 2 tabelas específicas\n"
+        "✓ Agregações e estatísticas avançadas\n"
+        "✓ Para cruzamento de 3 tabelas (Ajuste/Inventário/Troca), use sku_tre_table\n\n"
+        "Parâmetros:\n"
+        "- tables: lista de tabelas ['ajustes_estoque', 'inventario_saida']\n"
+        "- analysis_type: 'intersection' (interseção SKUs), 'aggregate' (agrupar), 'cross_join' (join)\n"
+        "- filters: dict {table_name: {column: value}} para filtrar cada tabela\n"
+        "- date_range: ['2025-01-01', '2025-06-30'] para filtrar por período\n"
+        "- group_by: coluna para agrupar (usado com analysis_type='aggregate')\n"
+        "- limit: número máximo de resultados\n\n"
+        "Retorna: SKUs + datas de cada tabela + estatísticas detalhadas + resumo"
+    )
+)(pandas_analysis_fn)
 
 def _execute_plan_to_html(plan: Plan) -> str:
     t = plan.tool
@@ -1847,7 +2265,7 @@ def _execute_plan_to_html(plan: Plan) -> str:
     if t == "sql_head":
         table = p.get("table")
         if not table:
-            return "<div class='muted'>Preciso do nome da tabela. Ex.: <code>mostre vendas_2025 com 5 linhas</code></div>"
+            return "<div class='muted'>Preciso do nome da tabela. Ex.: <code>mostre vendas_canceladas com 5 linhas</code></div>"
         n = int(p.get("n") or 5)
         return f"<h3>Amostra de <code>{html.escape(table)}</code></h3>" + to_html_rows(sql_head_fn(table, n), "sql_head")
 
@@ -1966,6 +2384,67 @@ def _execute_plan_to_html(plan: Plan) -> str:
 
         return to_html_rows(res, "sku_intersection")
 
+    if t == "sku_tre_table":
+        p_loja = p.get("p_loja") or p.get("loja")
+        p_data_ini = p.get("p_data_ini") or p.get("data_ini") or p.get("start")
+        p_data_fim = p.get("p_data_fim") or p.get("data_fim") or p.get("end")
+
+        if not p_loja or not p_data_ini or not p_data_fim:
+            return "<div class='muted'>Parâmetros obrigatórios: p_loja, p_data_ini, p_data_fim</div>"
+
+        res = sku_tre_table_fn(p_loja, p_data_ini, p_data_fim)
+
+        if isinstance(res, dict) and res.get("status") == "ok":
+            rows = res.get("rows") or []
+            total = res.get("total", len(rows))
+            params = res.get("params") or {}
+
+            summary_html = (
+                f"<div class='muted'>"
+                f"Loja: <b>{html.escape(str(params.get('loja', p_loja)))}</b> | "
+                f"Período: <b>{params.get('data_ini', p_data_ini)}</b> a <b>{params.get('data_fim', p_data_fim)}</b><br>"
+                f"<b>{total}</b> SKUs encontrados com (Ajuste OU Inventário) E Troca"
+                f"</div>"
+            )
+
+            if not rows:
+                return f"<h3>🔍 Cruzamento SKU (Ajuste/Inventário/Troca)</h3>{summary_html}<div class='muted'>Nenhum SKU encontrado no cruzamento.</div>"
+
+            table_html = to_html_rows(res, "sku_tre_table")
+            return f"<h3>🔍 Cruzamento SKU (Ajuste/Inventário/Troca)</h3>{summary_html}{table_html}"
+
+        return to_html_rows(res, "sku_tre_table")
+
+    if t == "pandas_analysis":
+        tables = p.get("tables") or []
+        analysis_type = p.get("analysis_type", "intersection")
+        filters = p.get("filters") or {}
+        group_by = p.get("group_by")
+        date_range = p.get("date_range")
+        limit = int(p.get("limit") or 100)
+
+        res = pandas_analysis_fn(tables, analysis_type, filters, group_by, date_range, limit)
+
+        if isinstance(res, dict) and res.get("status") == "ok":
+            rows = res.get("rows") or []
+            summary = res.get("summary") or {}
+
+            # Monta resumo bonito
+            summary_parts = []
+            if "total_skus_comuns" in summary:
+                summary_parts.append(f"<b>{summary['total_skus_comuns']}</b> SKUs encontrados na interseção")
+            if "registros_por_tabela" in summary:
+                for tbl, count in summary["registros_por_tabela"].items():
+                    summary_parts.append(f"<code>{html.escape(tbl)}</code>: {count} registros")
+
+            summary_html = "<div class='muted'>" + " | ".join(summary_parts) + "</div>" if summary_parts else ""
+
+            table_html = to_html_rows(res, "pandas_analysis")
+
+            return f"<h3>📊 Análise com Pandas ({analysis_type})</h3>{summary_html}{table_html}"
+
+        return to_html_rows(res, "pandas_analysis")
+
 # =========================
 # Fast-path (comandos diretos)
 # =========================
@@ -1991,9 +2470,9 @@ def _help_reply_html() -> str:
     tables = sorted(CATALOG.keys())
     exemplos = (
         "<ul>"
-        "<li><code>mostre cancelamento_2025 com 5 linhas</code></li>"
-        "<li><code>filtre SKU=10220110944410 e LOJA=333 em ajustes_estoque_2025 limite 20</code></li>"
-        "<li><code>agregue em cancelamento_2025 por LOJA somando VALORBRUTO top 5</code></li>"
+        "<li><code>mostre vendas_canceladas com 5 linhas</code></li>"
+        "<li><code>filtre SKU=10220110944410 e LOJA=333 em ajustes_estoque limite 20</code></li>"
+        "<li><code>agregue em vendas_canceladas por LOJA somando VALORBRUTO top 5</code></li>"
         "<li><code>SKUs com ajuste e devolução na loja 017 entre 2025-01-01 e 2025-06-30</code></li>"
         "</ul>"
     )
@@ -2068,10 +2547,10 @@ def fastpath_markdown(msg: str) -> str | None:
 
         if isinstance(res, dict) and (res.get("status") == "ok" or res.get("ok") is True):
             if res.get("html"):
-                return f"<h3>Filtro em <code>{html.escape(table)}</code> (SQLite)</h3>{res['html']}"
+                return f"<h3>Filtro em <code>{html.escape(table)}</code> (PostgreSQL)</h3>{res['html']}"
             data = res.get("data") or res.get("rows") or []
             html_table = _rows_to_html(data)
-            return f"<h3>Filtro em <code>{html.escape(table)}</code> (SQLite)</h3>{html_table}"
+            return f"<h3>Filtro em <code>{html.escape(table)}</code> (PostgreSQL)</h3>{html_table}"
 
 
 def _rows_to_md(rows: list[dict]) -> str:
@@ -2089,17 +2568,135 @@ def _rows_to_md(rows: list[dict]) -> str:
 agent = Agent(
     name="sentinela",
     system_message=(
-        "Você é o Sentinela. Sempre use ferramentas para obter dados (SQLite/CSV) e nunca invente. "
-        "Priorize SQLite sempre que existir tabela equivalente. "
-        "Escolha a ferramenta pelo tipo de intenção:\n"
-        "• Visualizar primeiras linhas de uma TABELA → sql_head.\n"
-        "• Filtrar por colunas/condições → sql_filter.\n"
-        "• Agregar (sum, count, avg, min, max) → sql_aggregate.\n"
-        "• Descobrir SKUs presentes em DUAS TABELAS (mesmos filtros) → sku_intersection.\n"
-        "• Contagens simples (ex.: “LOJA=333 aparece quantas vezes”) → sql_count.\n"
-        "Converta períodos de tempo para datas AAAA-MM-DD quando necessário, normalize códigos de loja (remova zeros à esquerda) "
+    "VOCÊ É UM ESPECIALISTA EM ANÁLISE DE FRAUDES E AUDITORIA DE ESTOQUE.\n"
+    "Sua missão é identificar padrões suspeitos cruzando dados entre múltiplas tabelas do sistema de gestão de estoque.\n"
+    "Você deve detectar inconsistências, movimentações anômalas e possíveis fraudes através de análise cruzada de dados.\n\n"
+
+    "SCHEMA DO BANCO DE DADOS (PostgreSQL Data Mart)\n"
+
+    "TABELA: ajustes_estoque\n"
+    "Descrição: Registra ajustes manuais de estoque (correções, acertos)\n"
+    "Colunas:\n"
+    "   • id (serial) - Identificador único\n"
+    "   • loja (varchar) - Código da loja (ex: '01', '02', '022')\n"
+    "   • data (date) - Data do ajuste\n"
+    "   • id_user (integer) - ID do usuário que fez o ajuste\n"
+    "   • id_tipo_ajuste (integer) - Tipo de ajuste\n"
+    "   • sku (varchar) - Código do produto\n"
+    "   • qtd_antiga (varchar) - Quantidade antes do ajuste\n"
+    "   • qtd_ajuste (varchar) - Quantidade ajustada\n"
+    "   • tipo_ajuste (varchar) - Descrição do tipo de ajuste\n"
+    "   • created_at (timestamp) - Data de criação do registro\n\n"
+
+    "TABELA: vendas_canceladas\n"
+    "   Descrição: Registra cancelamentos de vendas/orçamentos\n"
+    "   Colunas:\n"
+    "   • id (serial) - Identificador único\n"
+    "   • loja (varchar) - Código da loja\n"
+    "   • data_cancel (date) - Data do cancelamento\n"
+    "   • id_user (integer) - ID do usuário que cancelou\n"
+    "   • id_orcamento (bigint) - ID do orçamento cancelado\n"
+    "   • valor_bruto (varchar) - Valor do cancelamento\n"
+    "   • sku (varchar) - Código do produto\n"
+    "   • confirmado_cancelado (varchar) - Status de confirmação\n"
+    "   • ativo_cancelado (varchar) - Status ativo/cancelado\n"
+    "   • created_at (timestamp) - Data de criação do registro\n\n"
+
+    "TABELA: inventario_saida\n"
+    "   Descrição: Registra saídas de inventário (baixas, perdas, transferências)\n"
+    "   Colunas:\n"
+    "   • id (serial) - Identificador único\n"
+    "   • loja (varchar) - Código da loja\n"
+    "   • data (date) - Data da saída\n"
+    "   • complemento (varchar) - Informações adicionais\n"
+    "   • sku (varchar) - Código do produto\n"
+    "   • qtd_movimentada (varchar) - Quantidade movimentada\n"
+    "   • valor (varchar) - Valor da movimentação\n"
+    "   • created_at (timestamp) - Data de criação do registro\n\n"
+
+    "TABELA: troca\n"
+    "   Descrição: Registra trocas de produtos\n"
+    "   Colunas:\n"
+    "   • id (serial) - Identificador único\n"
+    "   • loja (varchar) - Código da loja\n"
+    "   • sku (varchar) - Código do produto\n"
+    "   • data_troca (date) - Data da troca\n"
+    "   • id_user (integer) - ID do usuário que registrou\n"
+    "   • id_troca (bigint) - ID da troca\n"
+    "   • id_orcamento_novo (bigint) - ID do novo orçamento\n"
+    "   • id_cliente (varchar) - ID do cliente\n"
+    "   • valor_produto (varchar) - Valor do produto\n"
+    "   • diferenca_valor_troca (varchar) - Diferença de valor na troca\n"
+    "   • tipo_movimentacao (varchar) - Tipo de movimentação\n"
+    "   • created_at (timestamp) - Data de criação do registro\n\n"
+
+    "FORMATO DE APRESENTAÇÃO OBRIGATÓRIO\n\n"
+
+    "SEMPRE apresente os resultados em formato de TABELA MARKDOWN:\n\n"
+
+    "Formato padrão para análise cruzada de SKUs:\n\n"
+    "| SKU  | Ajuste-Estoque | Inventário-Saída | Troca | Cancelamento |\n"
+    "|------|------|----------------|------------------|-------|-------------|\n"
+    "| 12345| 2025-01-15; 2025-02-20 | 2025-01-16 | - | 2025-01-17 |\n"
+    "| 67890| 2025-03-10 | 2025-03-11; 2025-03-12 | 2025-03-13 | - |\n\n"
+
+    "REGRAS DE FORMATAÇÃO:\n"
+    "• Cada célula pode conter MÚLTIPLAS DATAS separadas por ponto e vírgula (`;`)\n"
+    "• Use hífen (`-`) quando não houver dados para aquela tabela\n"
+    "• Sempre inclua a coluna SKU e Loja\n"
+    "• Ordene por SKU ou por frequência de aparições (mais suspeitos primeiro)\n"
+    "• Adicione uma linha de RESUMO ao final quando relevante\n\n"
+
+    "FERRAMENTAS DISPONÍVEIS\n\n"
+
+    "REGRA CRÍTICA - CRUZAMENTO DE TABELAS:\n"
+    "Quando o usuário pedir SKUs que aparecem em DUAS OU MAIS tabelas:\n"
+    "→ USE pandas_analysis com analysis_type='intersection'\n"
+    "→ NUNCA use sql_filter múltiplas vezes\n\n"
+
+    "EXEMPLO DE USO CORRETO:\n"
+    "Pergunta: 'SKUs da loja 022 com ajuste de estoque que também aparecem em inventário saída'\n"
+    "Resposta correta:\n"
+    "pandas_analysis(\n"
+    "  tables=['ajustes_estoque', 'inventario_saida'],\n"
+    "  analysis_type='intersection',\n"
+    "  filters={'ajustes_estoque': {'loja': '022'}, 'inventario_saida': {'loja': '022'}}\n"
+    ")\n\n"
+
+    "FERRAMENTAS PARA ANÁLISE ÚNICA (use apenas quando NÃO for cruzamento):\n"
+    "• list_tables - Listar tabelas disponíveis no banco\n"
+    "• sql_filter - Filtrar dados de UMA tabela específica\n"
+    "• sql_aggregate - Agregar/agrupar dados de UMA tabela (COUNT, SUM, AVG)\n"
+    "• sql_head - Visualizar primeiras linhas de UMA tabela\n"
+    "• sql_count - Contar registros em UMA tabela\n\n"
+
+    "FERRAMENTAS PARA CRUZAMENTO (use para detectar fraudes):\n"
+    "• sku_tre_table - PRINCIPAL: cruza Ajuste + Inventário + Troca (3 tabelas)\n"
+    "• pandas_analysis - Análise avançada com cruzamento de 2 tabelas\n"
+    "• sku_intersection - Interseção de SKUs entre duas tabelas\n\n"
+
+    "PADRÕES DE FRAUDE A DETECTAR\n\n"
+
+    "1. SKU com ajuste de estoque seguido de cancelamento (possível fraude)\n"
+    "2. SKU com múltiplos ajustes em curto período (suspeito)\n"
+    "3. SKU que aparece em inventário saída E troca no mesmo dia (inconsistência)\n"
+    "4. Usuário com alta frequência de ajustes/cancelamentos (padrão anômalo)\n"
+    "5. Loja com volume atípico de movimentações\n\n"
+
+    "Sempre que identificar padrões suspeitos, destaque-os na resposta com emojis:\n"
+    "🚨 = Fraude altamente provável\n"
+    "⚠️ = Padrão suspeito que requer investigação\n"
+    "ℹ️ = Informação relevante\n"
     ),
-    tools=[head_csv_tool, list_csvs_tool, sql_head_tool, sql_aggregate_tool, sql_filter_tool, sku_intersection_tool, sql_count_tool,  sql_count_tool],
+    tools=[
+        sku_tre_table_tool,
+        pandas_analysis_tool,
+        sku_intersection_tool,
+        sql_aggregate_tool,
+        sql_head_tool,
+        sql_count_tool,
+        list_tables_tool,  # Ferramenta para listar tabelas do PostgreSQL
+    ],
     model=_make_model(PRIMARY_MODEL, "primary")
 )
 
@@ -2115,11 +2712,38 @@ def render_md(text: str) -> str:
 class ChatIn(BaseModel):
     message: str
 
+def _detect_cross_table_query(msg: str) -> bool:
+    """Detecta se a pergunta requer cruzamento de tabelas"""
+    msg_lower = msg.lower()
+
+    # Padrões que indicam cruzamento
+    cross_patterns = [
+        r'aparecem?\s+(em|na|no)',
+        r'que\s+est[aã]o\s+(em|na|no)',
+        r'present(es?)?\s+(em|na|no)',
+        r'tamb[ée]m\s+(em|na|no)',
+        r'e\s+(em|na|no)\s+\w+',
+        r'com\s+\w+\s+e\s+\w+',
+    ]
+
+    # Verifica se menciona múltiplas tabelas
+    tables = ['ajustes', 'devolucao', 'devolu[cç][aã]o', 'cancelamento', 'inventario', 'invent[aá]rio']
+    table_count = sum(1 for t in tables if re.search(t, msg_lower))
+
+    # Verifica padrões de cruzamento
+    has_cross_pattern = any(re.search(p, msg_lower) for p in cross_patterns)
+
+    return table_count >= 2 or has_cross_pattern
+
 @app.post("/chat")
 def chat(in_: ChatIn, response: Response):
     try:
         raw = (in_.message or "").strip()
         forced, msg = _extract_forced_provider(raw)
+
+        # Detecta se é query de cruzamento e adiciona hint
+        if _detect_cross_table_query(msg):
+            msg = f"[CRUZAMENTO DE TABELAS DETECTADO] {msg}"
 
         # 1) smalltalk/help
         if _is_smalltalk(msg):
@@ -2184,15 +2808,15 @@ def chat(in_: ChatIn, response: Response):
             provider, model_id = "primary", PRIMARY_MODEL
 
         agent.model = _make_model(model_id, provider)
-        ok, out, err = _run_with_retry(agent, msg)
+        ok, out, err, tools_used = _run_with_retry(agent, msg)
 
         if (not ok or _needs_fallback(out)) and provider != "primary":
             agent.model = _make_model(PRIMARY_MODEL, "primary")
-            ok2, out2, err2 = _run_with_retry(agent, msg)
-            _set_resp_headers(response, provider="primary", model_id=PRIMARY_MODEL, path="agent->fallback", fallback=True)
+            ok2, out2, err2, tools_used2 = _run_with_retry(agent, msg)
+            _set_resp_headers(response, provider="primary", model_id=PRIMARY_MODEL, path="agent->fallback", fallback=True, tools_used=tools_used2)
             return {"answer": (out2 or out or f"Erro: {err2 or err}")}
 
-        _set_resp_headers(response, provider=provider, model_id=model_id, path="agent")
+        _set_resp_headers(response, provider=provider, model_id=model_id, path="agent", tools_used=tools_used)
         return {"answer": out}
     except Exception as e:
         traceback.print_exc()
@@ -2267,16 +2891,16 @@ def chat_html(message: str | None = None, in_: ChatIn | None = None, response:Re
         provider, model_id = "primary", PRIMARY_MODEL
 
     agent.model = _make_model(model_id, provider)
-    ok, out, err = _run_with_retry(agent, msg)
+    ok, out, err, tools_used = _run_with_retry(agent, msg)
 
     if (not ok or _needs_fallback(out)) and provider != "primary":
         agent.model = _make_model(PRIMARY_MODEL, "primary")
-        ok2, out2, err2 = _run_with_retry(agent, msg)
+        ok2, out2, err2, tools_used2 = _run_with_retry(agent, msg)
         final = out2 if (ok2 and out2) else (out or f"Erro: {err2 or err}")
-        _set_resp_headers(response, provider="primary", model_id=PRIMARY_MODEL, path="agent->fallback", fallback=True)
+        _set_resp_headers(response, provider="primary", model_id=PRIMARY_MODEL, path="agent->fallback", fallback=True, tools_used=tools_used2)
     else:
         final = out or (f"Erro: {err}" if err else "")
-        _set_resp_headers(response, provider=provider, model_id=model_id, path="agent")
+        _set_resp_headers(response, provider=provider, model_id=model_id, path="agent", tools_used=tools_used)
 
     return f"<div class='reply'>{render_md(final)}</div>"
 
@@ -2360,7 +2984,7 @@ def chat_ui():
     <div id="chat" class="chat"></div>
 
     <div class="row">
-      <input id="msg" type="text" placeholder="Ex.: mostre cancelamento_2025 com 5 linhas" autofocus />
+      <input id="msg" type="text" placeholder="Ex.: mostre vendas_canceladas com 5 linhas" autofocus />
       <button id="send">Enviar</button>
     </div>
     <div class="muted" style="margin-top:8px">Dica: faça upload em <code>/docs → POST /upload_csv</code> e pergunte pela tabela criada.</div>
@@ -2423,8 +3047,12 @@ def chat_ui():
       const provider = res.headers.get('X-Model-Provider') || '';
       const modelId  = res.headers.get('X-Model-Id') || '';
       const path     = res.headers.get('X-Responder-Path') || '';
+      const toolsUsed = res.headers.get('X-Tools-Used') || '';
       const fb       = res.headers.get('X-Model-Fallback') ? ' (fallback)' : '';
-      const meta     = [path, provider, modelId].filter(Boolean).join(' • ') + fb;
+      let meta       = [path, provider, modelId].filter(Boolean).join(' • ') + fb;
+      if (toolsUsed) {
+        meta += '\\nTools used → ' + toolsUsed;
+      }
 
       const html = await res.text();
       typing.remove();
@@ -2443,7 +3071,7 @@ def chat_ui():
   msgEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); send(); }});
 
   // Mensagem de boas-vindas
-  addBubble('Oi! Eu sou o Sentinela. Depois de fazer upload em /docs → POST /upload_csv, pergunte: "mostre as 5 primeiras linhas de cancelamento_2025".', 'bot', false);
+  addBubble('Tente perguntar: "loja 022 quais os sku de ajustes_estoque que aparecem em inventario_saida?".', 'bot', false);
 
   // 🔹 Badge de métricas
   const metricsEl = document.getElementById('metrics');
@@ -2478,4 +3106,4 @@ def chat_ui():
     )
 
 # inicializa catálogo na carga do módulo
-rebuild_catalog()
+# rebuild_catalog()  # Comentado - será executado no lifespan do app

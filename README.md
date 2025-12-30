@@ -1,8 +1,8 @@
 # Sentinela — README
 
 > **Autor:** Brandon Franco Ferreira  
-> **Stack:** FastAPI + Uvicorn + Planner (LLM) + Ferramentas de dados (CSV → SQLite) + UI web leve  
-> **Arquivos principais:** `server.py` (launcher/CLI) e `agent_app.py` (aplicação FastAPI)
+> **Stack:** FastAPI + Uvicorn + Planner (LLM) + Ferramentas de dados (PostgreSQL) + Frontend React/Vite  
+> **Arquivos principais:** `server.py` (launcher/CLI), `agent_app.py` (aplicação FastAPI) e `frontend/` (React)
 
 ---
 
@@ -58,20 +58,45 @@ Separação por arquivos:
 
 ## 3) Como executar
 
+### Opção 1: Script completo (Backend + Frontend)
+
+```bash
+# Windows - clique duplo ou execute:
+iniciar_completo.bat
+```
+
+### Opção 2: Manual (separado)
+
+**Backend (FastAPI):**
 ```bash
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-source .venv/bin/activate
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS/Linux
 
 pip install -r requirements.txt
-python server.py --host 0.0.0.0 --port 8000 --reload --ask-models
+python server.py --host 0.0.0.0 --port 8000 --reload
+```
+
+**Frontend (React/Vite):**
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Configurar variáveis de ambiente do Frontend
+
+Copie `frontend/.env.example` para `frontend/.env` e configure:
+```env
+VITE_API_URL=http://localhost:8000
+VITE_SUPABASE_URL=sua_url_supabase
+VITE_SUPABASE_ANON_KEY=sua_chave_anonima
 ```
 
 **URLs úteis**  
-- UI (chat): `http://127.0.0.1:8000/`  
-- Swagger: `http://127.0.0.1:8000/docs`
+- Frontend (React): `http://localhost:5173/`
+- Backend API: `http://localhost:8000/`  
+- Swagger: `http://localhost:8000/docs`
 
 ---
 
@@ -285,11 +310,20 @@ Forçar modelo primário no chat:
 
 ```
 .
-├── agent_app.py
-├── server.py
-├── requirements.txt
-├── data/
-│   └── (CSVs)
+├── agent_app.py          # Backend FastAPI + Agente IA
+├── server.py             # Launcher/CLI
+├── requirements.txt      # Dependências Python
+├── iniciar.bat           # Inicia apenas o backend
+├── iniciar_completo.bat  # Inicia backend + frontend
+├── .env                  # Variáveis de ambiente (backend)
+├── frontend/             # Frontend React/Vite
+│   ├── src/
+│   │   ├── pages/        # Páginas (Chat, Dashboard, Auth, etc.)
+│   │   ├── components/   # Componentes UI (Shadcn)
+│   │   ├── contexts/     # AuthContext (Supabase)
+│   │   └── hooks/        # Hooks customizados
+│   ├── .env              # Variáveis de ambiente (frontend)
+│   └── package.json
 └── README.md
 ```
 
